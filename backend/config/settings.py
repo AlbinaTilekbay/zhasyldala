@@ -248,4 +248,4 @@ OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
 # Directory (inside MEDIA_ROOT) where trained model weights are stored.
 ML_MODELS_DIR = MEDIA_ROOT / "model_versions"
 # Number of frames sampled from an uploaded sector video for inference.
-ML_VIDEO_SAMPLE_FRAMES = int(os.environ.get("ML_VIDEO_SAMPLE_FRAMES", "3"))
+ML_VIDEO_SAMPLE_FRAMES = int(os.environ.get("ML_VIDEO_SAMPLE_FRAMES", "5"))
