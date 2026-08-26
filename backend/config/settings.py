@@ -135,6 +135,13 @@ USE_TZ = True
 STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
 STORAGES = {
+    # Setting STORAGES at all replaces Django's built-in default wholesale —
+    # it does not merge with it — so leaving "default" out here (as this was
+    # until now) meant every ImageField/FileField save (leaf photos, scan
+    # videos, admin dataset uploads, bootstrap_plantvillage's downloads)
+    # raised KeyError: 'default' the moment it tried to write a file. This
+    # is what silently broke the anonymous home-plant diagnosis earlier too.
+    "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
     "staticfiles": {"BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage"},
 }
 
