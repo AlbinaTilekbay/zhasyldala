@@ -72,10 +72,11 @@ class ScanSessionViewSet(viewsets.ModelViewSet):
             tag = severity or "unscanned"
             counts[tag] = counts.get(tag, 0) + 1
 
+            narrative_name = (diagnosis.ai_narrative or {}).get("condition_name") if diagnosis else None
             cell = {
                 "sector_id": sector.id, "label": sector.label, "plants": sector.plant_count,
                 "tag": tag,
-                "diagnosis_disease": diagnosis.disease.name if diagnosis and diagnosis.disease else None,
+                "diagnosis_disease": (diagnosis.disease.name if diagnosis and diagnosis.disease else narrative_name),
                 "confidence": diagnosis.confidence if diagnosis else None,
             }
             if sector.row != current_row:
@@ -117,18 +118,21 @@ class ScanSessionViewSet(viewsets.ModelViewSet):
                 "meta": None,
                 "symptoms": [],
                 "recommendations": ["Қазіргі күтімді жалғастырыңыз."] if capture else [],
+                "ai_narrative": None,
                 "frame_image": capture.frame_image.url if capture and capture.frame_image else None,
             })
 
         tag_text = {"ok": "Қалыпты", "warn": "Қауіп бар", "bad": "Ауру"}[diagnosis.severity]
+        narrative_name = (diagnosis.ai_narrative or {}).get("condition_name")
         return Response({
             "sector": {"id": sector.id, "label": sector.label, "plants": sector.plant_count},
             "scanned": True,
             "tag": diagnosis.severity,
             "status_text": tag_text,
-            "diagnosis_name": diagnosis.disease.name if diagnosis.disease else "Ауру белгісі табылмады",
+            "diagnosis_name": diagnosis.disease.name if diagnosis.disease else (narrative_name or "Ауру белгісі табылмады"),
             "meta": f"Сенімділік {round(diagnosis.confidence * 100)}%",
             "symptoms": diagnosis.symptoms_seen,
             "recommendations": diagnosis.recommendations,
+            "ai_narrative": diagnosis.ai_narrative,
             "frame_image": capture.frame_image.url if capture.frame_image else None,
         })

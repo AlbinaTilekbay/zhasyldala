@@ -142,26 +142,16 @@ python manage.py bootstrap_plantvillage --no-activate      # train but don't swi
 (cucumber), Баялды (eggplant), and Көкөніс көктері (greens) aren't in
 PlantVillage at all (it only has 14 species total, mostly field/orchard
 crops), and "Ақұнтақ" (мучнистая роса / powdery mildew) has no matching
-tomato class either. Two ways to cover them:
-
-1. Add real photos over time through the admin training page — works for
-   literally any crop/disease, just slower to get started.
-2. Set `KINDWISE_API_KEY` (see `.env.example`) to enable
-   [Kindwise crop.health](https://www.kindwise.com/crop-health) as an
-   automatic fallback (`apps/ml/kindwise.py`) — 23 crops, ~288
-   diseases/pests, already wired into `apps/ml/services.py`. It's only
-   ever called when the custom model has nothing for the requested crop
-   (untrained, or a crop it was never trained on), so paid credits aren't
-   spent on requests the free local model already answers. **No free
-   tier** — from €50 for 1000 identifications
-   ([pricing](https://www.kindwise.com/pricing)). Its disease names don't
-   map onto the app's Kazakh knowledge base, so a Kindwise result shows
-   the raw (English/Latin) label as plain text rather than full
-   symptoms/recommendations — clearly marked as an external-API result.
+tomato class either. As long as `OPENAI_API_KEY` is set (see below), this
+doesn't matter for real-world use — OpenAI vision handles any crop/plant
+directly, with no dataset needed. `bootstrap_plantvillage` only matters
+for the **offline fallback** the app uses when there's no internet or the
+key isn't set; add real photos through the admin training page over time
+to widen what that offline model covers too.
 
 Re-running `bootstrap_plantvillage` adds more seed images and trains a
 fresh version each time; it's safe to run again later with a higher
-`--per-class` for a better starting model.
+`--per-class` for a better offline-model baseline.
 
 ### Manual path: the admin training page
 
@@ -182,39 +172,46 @@ fresh version each time; it's safe to run again later with a higher
 
 Both paths use the same underlying training loop and can be mixed freely —
 run the bootstrap command for a cold start, then keep improving the model
-through the admin page as real scans come in.
+through the admin page as real scans come in. This offline model is now
+the **fallback**, not the primary path — see the next section.
 
-Pl@ntNet (`PLANTNET_API_KEY` in `.env`) is optional and only ever used as
-a secondary species-confirmation signal, never the primary disease call —
-see `apps/ml/plantnet.py` for why (Pl@ntNet identifies species, not
-disease). Kindwise (`KINDWISE_API_KEY` in `.env`) is a separate optional,
-paid fallback that *does* diagnose disease, for crops the custom model
-has none — see `apps/ml/kindwise.py` and "Training the disease model"
-above.
+### Primary diagnosis engine: `OPENAI_API_KEY`
 
-### The anonymous home-plant flow ("Үй өсімдігі")
+The main way ZhasylDala diagnoses a photo is by sending it directly to an
+OpenAI vision-capable model (`apps/ml/openai_vision.py`), which both
+recognizes the plant/condition **and** writes the result-screen cards in
+one call — no separate species/disease dataset needed, no per-crop
+coverage gaps. Set `OPENAI_API_KEY` (see `.env.example`) to enable it:
 
-This flow never collects a crop, so it can be photographing literally
-anything — a tomato seedling, but just as easily a houseplant like an
-orchid that's nothing like the 6 greenhouse crops above. Same custom
-model, same rules: it only recognizes what it was actually trained on
-(currently tomato/pepper/strawberry from `bootstrap_plantvillage`, plus
-whatever's added via the admin page), and — since a low-confidence guess
-is worse than an honest "not sure" — a photo of anything else now falls
-through to a real fallback instead of confidently mislabeling it (see
-`MIN_CONFIDENCE` in `apps/ml/services.py`).
+1. The photo is sent to `gpt-4o-mini` (OpenAI's cheapest vision-capable
+   model) with a Kazakh, no-emoji prompt asking it to identify the
+   species and condition, estimate severity/confidence, and write four
+   clear sections: **Себебі** (cause), **Емдеу жолы** (treatment steps),
+   **Алдын алу кеңестері** (prevention tips), and a short closing
+   encouragement — rendered as their own cards on the result screen
+   (`AiNarrative` in `frontend/src/components/ui.jsx`), used on both the
+   home-plant result screen and a greenhouse sector's detail screen.
+2. This is the **primary** path for both flows (`apps/ml/services.py:
+   diagnose_image`) — tried first, before the offline model. It works for
+   literally any plant/crop, not just the ones with training data, which
+   is why `bootstrap_plantvillage`/Kindwise/Pl@ntNet-style per-crop
+   dataset coverage no longer matters for online use.
+3. It only falls through to the offline PlantVillage-trained model (see
+   above) when `OPENAI_API_KEY` isn't set, there's no internet, or the
+   call fails for some other reason — so the app still gives a real (if
+   narrower) answer with zero internet connection, just without the
+   OpenAI-written cards; failing that, a neutral "no answer yet" fallback.
+4. This is billed OpenAI API usage, separate from a ChatGPT Plus
+   subscription — create a key at
+   [platform.openai.com/api-keys](https://platform.openai.com/api-keys).
+   Each diagnosis sends one photo plus a short prompt to `gpt-4o-mini`, so
+   per-diagnosis cost is small — check OpenAI's current pricing page
+   before relying on it for heavy use.
 
-For that fallback, Kindwise's **crop.health** (used for greenhouse crops)
-isn't the right tool — it only covers ~23 food/field crops, no
-ornamentals. Instead, set `KINDWISE_HEALTH_API_KEY` to enable
-[Kindwise plant.health](https://www.kindwise.com/plant-health)
-(`apps/ml/plant_health.py`) — a *separate* Kindwise product/signup built
-for houseplants and ornamentals, returning a condition name plus
-description/treatment text. Same cost model as crop.health: only called
-when the custom model has nothing, no free tier
-([pricing](https://www.kindwise.com/pricing)), and its result shows as
-plain text (clearly marked as external) rather than a full Kazakh
-knowledge-base entry, for the same reason as crop.health.
+Kindwise (crop.health/plant.health) and Pl@ntNet were removed — OpenAI
+vision now covers what they used to cover (and more, since it isn't
+limited to ~23 crops or species-only identification), so there's no
+longer a reason to pay for or configure either.
 
 ## What's real vs. simplified in this first pass
 
@@ -225,13 +222,14 @@ knowledge-base entry, for the same reason as crop.health.
   reasonable place to invest more later (multi-frame voting, motion
   blur rejection, etc.).
 - `python manage.py bootstrap_plantvillage` seeds and trains a cold-start
-  model from a small PlantVillage sample automatically (see "Training the
-  disease model" above), but it only covers the tomato/pepper/strawberry
-  classes that have a clean PlantVillage match — other crops/diseases in
-  the seeded
-  knowledge base (e.g. Ақұнтақ, and every non-tomato crop) still need
-  photos added through the admin training page before the model can
-  recognize them.
+  **offline fallback** model from a small PlantVillage sample
+  automatically (see "Training the disease model" above), but it only
+  covers the tomato/pepper/strawberry classes that have a clean
+  PlantVillage match — other crops/diseases in the seeded knowledge base
+  (e.g. Ақұнтақ, and every non-tomato crop) still need photos added
+  through the admin training page before that offline model can recognize
+  them. This doesn't affect normal (online) use, where OpenAI vision is
+  the primary diagnosis engine and handles any crop/plant already.
 - One greenhouse per farmer is assumed throughout the frontend
   (`Dashboard`/`Profile`/`ScanFlow` all take "the first greenhouse"); the
   backend already supports several per owner — multi-greenhouse UI (a

@@ -82,21 +82,25 @@ Postgres-сервиса: подключение настроится само и
 ```
 DJANGO_SECRET_KEY=<случайная строка>
 DJANGO_DEBUG=False
-DJANGO_ALLOWED_HOSTS=*.up.railway.app
+DJANGO_ALLOWED_HOSTS=.up.railway.app
 CORS_ALLOWED_ORIGINS=https://ваш-поддомен.up.railway.app
 CSRF_TRUSTED_ORIGINS=https://ваш-поддомен.up.railway.app
 CELERY_TASK_ALWAYS_EAGER=True
 ```
 
-Необязательно, только если хотите платный Kindwise crop.health для
-огурцов/баялды/зелени, и/или plant.health для домашних/декоративных
-растений (например, орхидей) в анонимном потоке «Үй өсімдігі» — см.
-README, разделы «Training the disease model» и «The anonymous home-plant
-flow»:
+Важно: `DJANGO_ALLOWED_HOSTS` — это точка в начале (`.up.railway.app`), а
+**не** звёздочка (`*.up.railway.app`). Django понимает точку в начале
+как «любой поддомен», а звёздочку — никак, и такой домен просто не
+пройдёт проверку с непонятной ошибкой `DisallowedHost`.
+
+Основной способ диагностики — OpenAI (фото отправляется напрямую в
+OpenAI, она сама распознаёт растение и болезнь и пишет карточки с
+рекомендациями). Без этого ключа приложение всё равно работает — просто
+переходит на офлайн-модель (PlantVillage), см. README, раздел «Primary
+diagnosis engine: OPENAI_API_KEY»:
 
 ```
-KINDWISE_API_KEY=<ключ crop.health с kindwise.com>
-KINDWISE_HEALTH_API_KEY=<отдельный ключ plant.health с kindwise.com>
+OPENAI_API_KEY=<ключ с platform.openai.com/api-keys>
 ```
 
 `DJANGO_SECRET_KEY` сгенерируйте локально одной командой и вставьте
@@ -113,8 +117,9 @@ python3 -c "import secrets; print(secrets.token_urlsafe(50))"
 нормально; если станет тесно — можно добавить Redis-плагин и worker-сервис
 позже, ничего не переписывая с нуля.
 
-Поддомен `*.up.railway.app` Railway выдаёт сразу после первого деплоя —
-посмотрите его в **Settings → Networking** сервиса и подставьте в
+Поддомен вида `zhasyldala-production.up.railway.app` Railway выдаёт сразу
+после первого деплоя — посмотрите его в **Settings → Networking** сервиса
+и подставьте в
 переменные выше вместо `ваш-поддомен`.
 
 ## 5. Постоянное хранилище для фото и обученной модели

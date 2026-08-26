@@ -219,23 +219,16 @@ CELERY_TASK_EAGER_PROPAGATES = True
 # ---------------------------------------------------------------------------
 # ZhasylDala-specific settings
 # ---------------------------------------------------------------------------
-PLANTNET_API_KEY = os.environ.get("PLANTNET_API_KEY", "")
-PLANTNET_PROJECT = os.environ.get("PLANTNET_PROJECT", "k-world-flora")
-PLANTNET_BASE_URL = os.environ.get("PLANTNET_BASE_URL", "https://my-api.plantnet.org/v2")
-
-# Optional, paid, opt-in secondary diagnosis source for crops the custom
-# model has no training data for (see apps/ml/kindwise.py) — no-ops until
-# set. Get a key at https://www.kindwise.com/crop-health (no free tier).
-KINDWISE_API_KEY = os.environ.get("KINDWISE_API_KEY", "")
-
-# Same idea as KINDWISE_API_KEY above, but for the *anonymous home-plant*
-# flow (crop=None) specifically — plant.id's health_assessment API covers
-# houseplants/ornamentals (e.g. orchids), which crop.health doesn't (see
-# apps/ml/plant_health.py). A separate key from a separate signup at
-# https://www.kindwise.com/plant-health — no free tier, and not
-# necessarily the same key as KINDWISE_API_KEY (check kindwise.com if
-# unsure whether your account unifies billing across their products).
-KINDWISE_HEALTH_API_KEY = os.environ.get("KINDWISE_HEALTH_API_KEY", "")
+# Primary diagnosis engine (see apps/ml/openai_vision.py): sends the photo
+# straight to an OpenAI vision-capable model, which identifies the plant
+# and its condition AND writes the result-screen cards (cause, treatment
+# steps, prevention tips, encouragement) in one call. No-ops until set —
+# apps/ml/services.py then falls back to the offline PlantVillage-trained
+# model (works with no internet at all, just narrower: currently only
+# tomato/pepper/strawberry). Get a key (separate from a ChatGPT Plus
+# subscription — this is billed API usage) at
+# https://platform.openai.com/api-keys.
+OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
 
 # Directory (inside MEDIA_ROOT) where trained model weights are stored.
 ML_MODELS_DIR = MEDIA_ROOT / "model_versions"

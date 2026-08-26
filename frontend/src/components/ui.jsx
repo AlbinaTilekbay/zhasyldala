@@ -72,6 +72,48 @@ export function NumberedList({ items }) {
   );
 }
 
+// Renders the OpenAI vision diagnosis result (see backend
+// apps/ml/openai_vision.py) as a set of clearly-labeled, emoji-free
+// sections — a short cause paragraph, concrete treatment steps,
+// prevention tips, and a closing encouragement highlight. Returns null
+// (renders nothing) when there's no narrative yet — e.g. the offline
+// fallback model answered instead — so callers can render it
+// unconditionally.
+export function AiNarrative({ narrative }) {
+  if (!narrative) return null;
+  const { cause, treatment_steps, prevention_tips, encouragement } = narrative;
+  return (
+    <>
+      {cause && (
+        <div className="card card-lg">
+          <div style={{ font: "700 14px var(--font)", marginBottom: 8 }}>Себебі</div>
+          <div className="subtle">{cause}</div>
+        </div>
+      )}
+      {treatment_steps?.length > 0 && (
+        <div className="card card-lg">
+          <div style={{ font: "700 14px var(--font)", marginBottom: 12 }}>Емдеу жолы</div>
+          <NumberedList items={treatment_steps} />
+        </div>
+      )}
+      {prevention_tips?.length > 0 && (
+        <div className="card card-lg">
+          <div style={{ font: "700 14px var(--font)", marginBottom: 12 }}>Алдын алу кеңестері</div>
+          <BulletList items={prevention_tips} />
+        </div>
+      )}
+      {encouragement && (
+        <div
+          className="card card-lg"
+          style={{ background: "var(--accent-tint)", borderColor: "rgba(15,118,110,.18)" }}
+        >
+          <div style={{ font: "500 13px/1.6 var(--font)", color: "var(--accent-hover)" }}>{encouragement}</div>
+        </div>
+      )}
+    </>
+  );
+}
+
 export function BulletList({ items }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>

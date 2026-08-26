@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { api, mediaUrl } from "../../api/client";
 import AppShell from "../../components/AppShell";
 import { BackButton } from "../../components/TopBar";
-import { NumberedList, PrimaryButton, SeverityBadge, Spinner } from "../../components/ui";
+import { AiNarrative, NumberedList, PrimaryButton, SeverityBadge, Spinner } from "../../components/ui";
 import { useCamera } from "../../hooks/useCamera";
 
 // Ports the mockup's plant_capture -> plant_analyzing -> plant_result
@@ -146,6 +146,20 @@ export default function HomePlantFlow() {
 
   const diag = result?.result;
   const disease = diag?.disease;
+  const narrative = diag?.ai_narrative;
+  // OpenAI vision results never map onto our local Disease knowledge base
+  // — diag.disease is always null for them by design (see
+  // apps/ml/openai_vision.py) — so the condition name/description it came
+  // up with live in diag.ai_narrative instead. Reading only disease?.*
+  // here, as this screen used to (before OpenAI vision existed), silently
+  // threw that content away and always showed the generic "no disease
+  // found" placeholder even when a full real answer came back.
+  const isAiResult = diag?.source === "openai_vision";
+  const adviceItems = disease?.home_care_advice?.length
+    ? disease.home_care_advice
+    : diag?.recommendations?.length
+      ? diag.recommendations
+      : ["Күтімді жалғастырыңыз."];
 
   return (
     <AppShell>
@@ -169,14 +183,22 @@ export default function HomePlantFlow() {
                 Сенімділік {Math.round((diag?.confidence || 0) * 100)}%
               </span>
             </div>
-            <div style={{ font: "700 20px var(--font)" }}>{disease?.name || "Ауру белгісі табылмады"}</div>
-            <div className="subtle">{disease?.description || "Өсімдік қалыпты көрінеді."}</div>
+            <div style={{ font: "700 20px var(--font)" }}>
+              {disease?.name || narrative?.condition_name || (isAiResult ? diag?.species_guess || "Нәтиже белгісіз" : "Ауру белгісі табылмады")}
+            </div>
+            <div className="subtle">
+              {disease?.description || narrative?.description || (isAiResult ? "Толығырақ — төменде." : "Өсімдік қалыпты көрінеді.")}
+            </div>
           </div>
         </div>
-        <div className="card card-lg">
-          <div style={{ font: "700 14px var(--font)", marginBottom: 12 }}>Не істеу керек</div>
-          <NumberedList items={disease?.home_care_advice?.length ? disease.home_care_advice : ["Күтімді жалғастырыңыз."]} />
-        </div>
+        {diag?.ai_narrative ? (
+          <AiNarrative narrative={diag.ai_narrative} />
+        ) : (
+          <div className="card card-lg">
+            <div style={{ font: "700 14px var(--font)", marginBottom: 12 }}>Не істеу керек</div>
+            <NumberedList items={adviceItems} />
+          </div>
+        )}
         <button className="btn btn-ghost" onClick={() => navigate("/register")}>
           Жылыжайым бар — секторларға өту
         </button>

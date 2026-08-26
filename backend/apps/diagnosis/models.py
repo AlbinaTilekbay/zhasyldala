@@ -73,11 +73,17 @@ class DiagnosisRequest(models.Model):
 
 class Diagnosis(models.Model):
     class Source(models.TextChoices):
-        CUSTOM_MODEL = "custom_model", "Меншікті модель"
-        PLANTNET = "plantnet", "Pl@ntNet"
-        KINDWISE = "kindwise_api", "crop.health (Kindwise)"
-        PLANT_HEALTH = "plant_health_api", "plant.health (Kindwise)"
+        OPENAI_VISION = "openai_vision", "OpenAI (фото бойынша)"
+        CUSTOM_MODEL = "custom_model", "Меншікті модель (PlantVillage, офлайн)"
         RULE = "rule", "Ереже (fallback)"
+        # Kept for old rows only — these external sources (Pl@ntNet,
+        # Kindwise crop.health/plant.health) were removed in favor of
+        # OpenAI vision doing both recognition and the result cards in one
+        # call (see apps/ml/openai_vision.py). New diagnoses never use
+        # these values; nothing currently reads them either.
+        PLANTNET = "plantnet", "Pl@ntNet (өшірілген)"
+        KINDWISE = "kindwise_api", "crop.health / Kindwise (өшірілген)"
+        PLANT_HEALTH = "plant_health_api", "plant.health / Kindwise (өшірілген)"
 
     request = models.OneToOneField(DiagnosisRequest, on_delete=models.CASCADE, related_name="result")
     disease = models.ForeignKey(Disease, on_delete=models.SET_NULL, null=True, blank=True, related_name="diagnoses")
@@ -89,6 +95,14 @@ class Diagnosis(models.Model):
     source = models.CharField(max_length=20, choices=Source.choices, default=Source.CUSTOM_MODEL)
     model_version = models.ForeignKey(
         "ml_training.ModelVersion", on_delete=models.SET_NULL, null=True, blank=True, related_name="diagnoses"
+    )
+    ai_narrative = models.JSONField(
+        null=True, blank=True,
+        help_text="OpenAI vision result: {condition_name, description, cause, "
+                   "treatment_steps, prevention_tips, encouragement} — see "
+                   "apps/ml/openai_vision.py. Null when OPENAI_API_KEY isn't set, "
+                   "there's no internet, or the call failed; the result screen falls "
+                   "back to the offline model's plain recommendations list in that case.",
     )
     created_at = models.DateTimeField(auto_now_add=True)
 
