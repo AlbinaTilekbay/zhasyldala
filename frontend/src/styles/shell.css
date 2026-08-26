@@ -14,43 +14,17 @@
 .app-shell {
   width: 100%;
   max-width: var(--shell-width);
-  /* `height: 100dvh` (a plain in-flow flex column) fixed the "menu
-     scrolls away" bug, but on an iPhone it traded it for a worse one:
-     the moment a text/number input inside .screen-scroll gets focus, iOS
-     shows the keyboard and resizes the *visual* viewport — but `dvh`
-     units and in-flow layout don't reliably re-settle when that happens,
-     so the flex column's height computation and .screen-scroll's
-     internal scrolling can end up stuck ("frozen") until the keyboard
-     closes, which reads exactly like "the page won't scroll down to the
-     button" (and the button unreachable reads as "the button doesn't
-     work"). Anchoring the shell with `position: fixed` + top/bottom
-     instead sidesteps this entirely: a fixed element is pinned to the
-     visual viewport directly by the browser, independent of dvh
-     recalculation timing, so it isn't affected by the keyboard opening
-     at all — only .screen-scroll's own native touch-scrolling has to
-     keep working, which iOS handles natively for overflow:auto. */
-  position: fixed;
-  top: 0;
-  bottom: 0;
-  left: 50%;
-  transform: translateX(-50%);
+  min-height: 100dvh;
   background: var(--bg-shell);
   display: flex;
   flex-direction: column;
+  position: relative;
   overflow-x: hidden;
 }
 
 @media (min-width: 768px) {
   .app-backdrop { align-items: center; padding: 32px 0; }
   .app-shell {
-    /* Desktop/tablet has no on-screen keyboard to fight with, so the
-       centered "phone card" look goes back to sitting in normal flow
-       inside .app-backdrop's flex centering, same as before. */
-    position: relative;
-    top: auto;
-    bottom: auto;
-    left: auto;
-    transform: none;
     min-height: min(874px, 92dvh);
     height: min(874px, 92dvh);
     border-radius: 40px;
@@ -158,12 +132,7 @@
 .field-label { font: 500 11px var(--font); color: var(--ink-faint); }
 .field-value { font: 500 15px var(--font); margin-top: 3px; }
 .field input {
-  /* font-size must be >= 16px: below that, iOS Safari auto-zooms the
-     whole page in when the field is focused (some iOS versions do this
-     even with the viewport meta tag's maximum-scale=1) — on the fixed-
-     position app shell that reads as the page suddenly "freezing" until
-     you manually pinch back out. */
-  border: 0; outline: 0; width: 100%; font: 500 16px var(--font); margin-top: 3px; padding: 0; background: transparent;
+  border: 0; outline: 0; width: 100%; font: 500 15px var(--font); margin-top: 3px; padding: 0; background: transparent;
 }
 
 .avatar-circle {

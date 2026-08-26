@@ -42,10 +42,25 @@ export default function GridSetup() {
   const [mode, setMode] = useState("preset"); // preset | custom
   const [customRows, setCustomRows] = useState(DEFAULT_CUSTOM_ROWS);
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
 
   useEffect(() => {
     api.publicGet("/api/sector-grid-presets/").then(setPresets);
   }, []);
+
+  useEffect(() => {
+    // greenhouseId lives only in memory (useSetupStore is deliberately
+    // not persisted — see that file). If the tab got reloaded partway
+    // through the wizard (iOS Safari does this on its own under memory
+    // pressure, e.g. after backgrounding it a while), greenhouseId comes
+    // back null and every request on this screen would silently fail
+    // against "/api/greenhouses/null/..." — the button visibly reacts to
+    // the tap (its own :active/hover state) but nothing happens after,
+    // because the POST 404s and the error had nowhere to go. Bouncing
+    // back to the start of the wizard here turns that dead end into a
+    // clear "please start over" instead.
+    if (!greenhouseId) navigate("/register", { replace: true });
+  }, [greenhouseId, navigate]);
 
   const selected = presets.find((p) => p.label === presetLabel) || presets[1];
   const customCounts = customRows.map(clampRowCount);
@@ -75,10 +90,19 @@ export default function GridSetup() {
 
   async function next() {
     setBusy(true);
+    setError(null);
     try {
       const body = mode === "custom" ? { row_counts: customCounts } : { preset_label: presetLabel };
       await api.post(`/api/greenhouses/${greenhouseId}/sectors/generate/`, body);
       navigate("/setup/qr");
+    } catch (err) {
+      // Without this, a failed request left the button looking like it
+      // did nothing at all (its tap/hover color flashes, then silence) —
+      // no navigation, no visible reason why, nothing in the UI to act
+      // on. Surfacing the real message (validation detail, network
+      // error, whatever it is) turns that dead end into something
+      // actionable.
+      setError(err?.data?.detail || err?.message || "Секторлар жасалмады. Қайталап көріңіз.");
     } finally {
       setBusy(false);
     }
@@ -186,7 +210,8 @@ export default function GridSetup() {
             </div>
           </div>
         )}
-        <PrimaryButton onClick={next} disabled={busy}>QR белгілерін жасау</PrimaryButton>
+        {error && <div style={{ color: "var(--bad)", font: "500 13px var(--font)" }}>{error}</div>}
+        <PrimaryButton onClick={next} disabled={busy}>{busy ? "Жасалуда…" : "QR белгілерін жасау"}</PrimaryButton>
       </div>
     </AppShell>
   );
