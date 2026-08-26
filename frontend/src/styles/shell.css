@@ -14,7 +14,16 @@
 .app-shell {
   width: 100%;
   max-width: var(--shell-width);
-  min-height: 100dvh;
+  /* Was min-height — on a real phone (the media query below only kicks in
+     ≥768px) that let the shell grow taller than the viewport to fit long
+     screens, since min-height only sets a floor, not a ceiling. With
+     nothing actually capping its height, .screen-scroll's overflow-y:
+     auto never had anything to scroll internally, so the whole PAGE
+     scrolled instead — dragging the bottom tab bar down with it instead
+     of it staying pinned. A hard height locks the shell to the viewport
+     so .screen-scroll (flex:1; overflow-y:auto) is what scrolls, and the
+     tab bar — a flex sibling after it — stays put. */
+  height: 100dvh;
   background: var(--bg-shell);
   display: flex;
   flex-direction: column;

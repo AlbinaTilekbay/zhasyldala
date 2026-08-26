@@ -8,7 +8,17 @@ import { useSetupStore } from "../../store/useSetupStore";
 
 const ROW_LETTERS = "ABCDE";
 const MAX_ROWS = ROW_LETTERS.length;
-const DEFAULT_CUSTOM_ROWS = [6, 6, 4];
+// Kept as strings, not numbers — an <input> bound to a clamped number
+// used to force the field back to "1" on every keystroke the instant it
+// was cleared (Number("") is 0, so `|| 1` fired mid-edit), making it
+// impossible to actually clear a field and type a different number.
+// Clamping only happens on blur/submit now; while typing, any digits
+// (including empty) are accepted as-is.
+const DEFAULT_CUSTOM_ROWS = ["6", "6", "4"];
+
+function clampRowCount(raw) {
+  return Math.max(1, Math.min(30, parseInt(raw, 10) || 1));
+}
 
 function previewRows(rowCounts) {
   return rowCounts.map((count, i) => {
@@ -38,16 +48,25 @@ export default function GridSetup() {
   }, []);
 
   const selected = presets.find((p) => p.label === presetLabel) || presets[1];
-  const previewRowCounts = mode === "custom" ? customRows : selected ? Array(selected.rows).fill(selected.cols) : [];
-  const customTotal = customRows.reduce((a, b) => a + b, 0);
+  const customCounts = customRows.map(clampRowCount);
+  const previewRowCounts = mode === "custom" ? customCounts : selected ? Array(selected.rows).fill(selected.cols) : [];
+  const customTotal = customCounts.reduce((a, b) => a + b, 0);
 
   function updateCustomRow(i, value) {
-    const n = Math.max(1, Math.min(30, Number(value) || 1));
-    setCustomRows((rows) => rows.map((r, idx) => (idx === i ? n : r)));
+    // Accept empty / any digits while typing — don't clamp here, or
+    // clearing the field to type a fresh number snaps it back to "1"
+    // before the next keystroke lands.
+    if (value === "" || /^\d{0,2}$/.test(value)) {
+      setCustomRows((rows) => rows.map((r, idx) => (idx === i ? value : r)));
+    }
+  }
+
+  function blurCustomRow(i) {
+    setCustomRows((rows) => rows.map((r, idx) => (idx === i ? String(clampRowCount(r)) : r)));
   }
 
   function addCustomRow() {
-    setCustomRows((rows) => (rows.length >= MAX_ROWS ? rows : [...rows, rows[rows.length - 1] || 4]));
+    setCustomRows((rows) => (rows.length >= MAX_ROWS ? rows : [...rows, rows[rows.length - 1] || "4"]));
   }
 
   function removeCustomRow(i) {
@@ -57,7 +76,7 @@ export default function GridSetup() {
   async function next() {
     setBusy(true);
     try {
-      const body = mode === "custom" ? { row_counts: customRows } : { preset_label: presetLabel };
+      const body = mode === "custom" ? { row_counts: customCounts } : { preset_label: presetLabel };
       await api.post(`/api/greenhouses/${greenhouseId}/sectors/generate/`, body);
       navigate("/setup/qr");
     } finally {
@@ -119,10 +138,12 @@ export default function GridSetup() {
                   <div className="field-label">{i + 1}-қатар — сектор саны</div>
                   <input
                     type="number"
+                    inputMode="numeric"
                     min={1}
                     max={30}
                     value={count}
                     onChange={(e) => updateCustomRow(i, e.target.value)}
+                    onBlur={() => blurCustomRow(i)}
                   />
                 </label>
                 <button
