@@ -11,6 +11,14 @@ export function useCamera({ facingMode = "environment" } = {}) {
   const [error, setError] = useState(null);
 
   const start = useCallback(async () => {
+    // Idempotent: a caller that starts the camera again while it's already
+    // running (e.g. a step-change effect re-firing) reuses the existing
+    // stream instead of tearing it down and re-acquiring — see the
+    // scan_confirm -> scan_video note below for why that matters.
+    if (streamRef.current) {
+      setReady(true);
+      return;
+    }
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         video: { facingMode }, audio: false,

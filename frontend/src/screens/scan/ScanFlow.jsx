@@ -57,7 +57,18 @@ export default function ScanFlow() {
   }, []);
 
   useEffect(() => {
-    if (step === "scan_qr" || step === "scan_video") camera.start();
+    // scan_confirm must keep the stream alive too, even though it doesn't
+    // render <video>: it used to fall through to camera.stop() here, so by
+    // the time startRec() below called camera.startRecording() the stream
+    // had already been torn down and camera.start() (triggered by the step
+    // changing to scan_video) hadn't finished re-acquiring it yet.
+    // startRecording() bails out silently when there's no stream, so no
+    // MediaRecorder was ever created — stopRecording() later resolved with
+    // null, and handing that to FormData.append() is exactly what produced
+    // "Argument 2 ('blobValue') to FormData.append must be an instance of
+    // Blob". camera.start() is a no-op once already running, so keeping it
+    // "on" across all three steps is cheap.
+    if (step === "scan_qr" || step === "scan_confirm" || step === "scan_video") camera.start();
     else camera.stop();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [step]);
@@ -134,6 +145,16 @@ export default function ScanFlow() {
           camera.stopRecording(), 8000, "Камера жауап бермей жатыр — қайталап көріңіз."
         );
         setRecording(false);
+      }
+
+      // Belt-and-suspenders: if no MediaRecorder ever actually started
+      // (camera not ready in time, permission hiccup, etc.) stopRecording()
+      // resolves with null instead of a Blob. Catch that here with a clear,
+      // retryable message instead of letting FormData.append() throw its
+      // low-level "must be an instance of Blob" error straight at the user.
+      if (!(recordedBlobRef.current instanceof Blob) || recordedBlobRef.current.size === 0) {
+        recordedBlobRef.current = null;
+        throw new Error("Видео жазылмады — камера дайын болмады. Қайталап көріңіз.");
       }
 
       const form = new FormData();
