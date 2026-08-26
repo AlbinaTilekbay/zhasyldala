@@ -1,0 +1,72 @@
+/* Design tokens lifted directly from the ZhasylDala.dc.html mockup —
+   keep this file as the single source of truth for colors/radii/type so
+   every screen stays visually consistent with the approved design. */
+:root {
+  --font: "Onest", system-ui, sans-serif;
+  --mono: ui-monospace, Menlo, monospace;
+
+  --bg-page: #EFEFEC;
+  --bg-shell: #F6F7F6;
+  --bg-shell-dark: #101512;
+  --bg-shell-darker: #0C110F;
+  --bg-card: #ffffff;
+
+  --ink: #14201E;
+  --ink-soft: #3D4B47;
+  --ink-mute: #6B7A76;
+  --ink-faint: #8A9793;
+  --ink-hairline: rgba(20, 32, 30, 0.1);
+
+  --accent: #0F766E;
+  --accent-hover: #0B5C56;
+  --accent-tint: #E6F2F0;
+  --accent-tint-strong: #DCEDE9;
+
+  --warn: #B07A12;
+  --warn-ink: #8A6410;
+  --warn-tint: #FBF2DE;
+  --warn-tint-strong: #F7EBCF;
+
+  --bad: #B4402E;
+  --bad-ink: #963627;
+  --bad-tint: #FBEAE6;
+  --bad-tint-strong: #F7DED7;
+
+  --unscanned-tint: #EDEFEE;
+  --unscanned-ink: #9AA5A2;
+
+  --rec: #FF4D3D;
+  --scan-line: #2FD3B6;
+
+  --radius-lg: 22px;
+  --radius-md: 16px;
+  --radius-sm: 12px;
+  --radius-pill: 999px;
+
+  --shell-width: 430px;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  background: var(--bg-page);
+  font-family: var(--font);
+  -webkit-font-smoothing: antialiased;
+  color: var(--ink);
+}
+
+body { min-height: 100dvh; }
+
+a { color: var(--accent); }
+a:hover { color: var(--accent-hover); }
+
+button { font-family: var(--font); cursor: pointer; }
+button:disabled { cursor: not-allowed; opacity: 0.5; }
+
+::-webkit-scrollbar { width: 0; height: 0; }
+
+@keyframes gg-spin { to { transform: rotate(360deg); } }
+@keyframes gg-pulse { 0%, 100% { opacity: 0.35; } 50% { opacity: 1; } }
+@keyframes gg-rec { 0%, 100% { opacity: 1; } 50% { opacity: 0.2; } }
+@keyframes gg-scanline { 0% { transform: translateY(0); } 100% { transform: translateY(210px); } }

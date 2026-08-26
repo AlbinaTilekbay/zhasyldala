@@ -1,0 +1,49 @@
+# Single-image build for one-service hosting (Railway, Render, Fly.io, a
+# plain VPS with `docker run`, ...): builds the React frontend, then bakes
+# it into the Django image so one process (gunicorn) serves the app, the
+# API, the admin, and the trained-model inference all together.
+#
+# For the multi-container setup (separate web/worker/frontend/redis
+# services) use docker-compose.yml instead — this file is the simpler
+# alternative for a single small server / hobby-tier PaaS deploy.
+
+# ---- Stage 1: build the React frontend ----
+FROM node:22-alpine AS frontend-build
+WORKDIR /app/frontend
+COPY frontend/package.json ./
+RUN npm install
+COPY frontend/ ./
+RUN npm run build
+
+# ---- Stage 2: Django, serving the built frontend + running inference ----
+FROM python:3.12-slim
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
+WORKDIR /app
+
+# libgl1/libglib for opencv-python-headless (video-frame sampling);
+# libpq-dev/gcc only needed if psycopg2 has to build from source.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libgl1 libglib2.0-0 libpq-dev gcc \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY backend/requirements.txt backend/requirements-ml.txt ./
+RUN pip install --no-cache-dir -r requirements.txt
+# CPU-only torch/torchvision wheels (the default PyPI ones pull a multi-GB
+# CUDA build you don't need on a PaaS box) — this is what actually powers
+# `bootstrap_plantvillage` and the admin "Оқытуды бастау" retraining.
+# Comment this line out if your host is too small/slow for it; the app
+# still runs fully without it, diagnosis just stays on the neutral
+# "model not trained yet" fallback until you install it later.
+RUN pip install --no-cache-dir -r requirements-ml.txt --extra-index-url https://download.pytorch.org/whl/cpu
+
+COPY backend/ ./
+COPY --from=frontend-build /app/frontend/dist ./frontend_dist
+
+RUN python manage.py collectstatic --noinput
+
+EXPOSE 8000
+# $PORT is injected by Railway (and most PaaS) at runtime; 8000 is the
+# fallback for `docker run` / other hosts that don't set it.
+CMD sh -c "python manage.py migrate --noinput && \
+           python manage.py seed_data && \
+           gunicorn config.wsgi:application --bind 0.0.0.0:${PORT:-8000} --workers 3"

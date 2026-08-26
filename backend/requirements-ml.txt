@@ -1,0 +1,15 @@
+# Optional ML stack — install after requirements.txt to enable real
+# inference and the admin retraining pipeline:
+#   pip install -r requirements.txt -r requirements-ml.txt
+#
+# Without these, the app still runs end-to-end (uploads, sectors, QR,
+# reports, plans, tips) but every diagnosis comes back as the neutral
+# "model not trained yet" fallback — see apps/ml/services.py.
+
+# CPU wheels by default; swap for a CUDA build if you have a GPU box:
+# https://pytorch.org/get-started/locally/
+torch>=2.3
+torchvision>=0.18
+
+opencv-python-headless>=4.10
+numpy>=1.26

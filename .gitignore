@@ -1,0 +1,14 @@
+# OS / editor cruft
+.DS_Store
+.vscode/
+.idea/
+
+# Safety net — the real rules live in backend/.gitignore and
+# frontend/.gitignore, this just catches anything created at repo root.
+__pycache__/
+*.pyc
+venv/
+.env
+node_modules/
+dist/
+frontend_dist/

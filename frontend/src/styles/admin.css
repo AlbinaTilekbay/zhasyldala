@@ -1,0 +1,41 @@
+/* The admin/training area is a plain desktop-friendly layout — staff
+   doing bulk dataset work don't want the phone-frame constraint the rest
+   of the site uses. Kept visually related (same font/accent) but wider. */
+.admin-shell { min-height: 100dvh; background: var(--bg-page); }
+
+.admin-nav {
+  display: flex; align-items: center; gap: 4px; padding: 14px 28px;
+  background: #fff; border-bottom: 1px solid var(--ink-hairline);
+}
+.admin-nav .brand { font: 800 15px var(--font); margin-right: 20px; }
+.admin-nav a {
+  padding: 8px 14px; border-radius: 10px; font: 600 13.5px var(--font); color: var(--ink-mute); text-decoration: none;
+}
+.admin-nav a.active, .admin-nav a:hover { background: var(--accent-tint); color: var(--accent); }
+.admin-nav .spacer { flex: 1; }
+
+.admin-body { max-width: 1040px; margin: 0 auto; padding: 28px; display: flex; flex-direction: column; gap: 20px; }
+
+.admin-table { width: 100%; border-collapse: collapse; background: #fff; border-radius: 14px; overflow: hidden; border: 1px solid var(--ink-hairline); }
+.admin-table th, .admin-table td { text-align: left; padding: 10px 14px; font: 400 13px var(--font); border-bottom: 1px solid var(--ink-hairline); }
+.admin-table th { font-weight: 700; color: var(--ink-mute); background: #FAFAF9; }
+.admin-table tr:last-child td { border-bottom: 0; }
+
+.admin-card { background: #fff; border: 1px solid var(--ink-hairline); border-radius: 16px; padding: 20px; }
+.admin-card h2 { font: 700 15px var(--font); margin: 0 0 14px; }
+
+.admin-form-row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+.admin-form-row select, .admin-form-row input[type=file] {
+  font: 400 13px var(--font); padding: 8px 10px; border-radius: 8px; border: 1px solid var(--ink-hairline);
+}
+.admin-btn {
+  padding: 9px 16px; border-radius: 10px; border: 0; background: var(--accent); color: #fff; font: 600 13px var(--font);
+}
+.admin-btn:hover:not(:disabled) { background: var(--accent-hover); }
+.admin-btn:disabled { opacity: .5; }
+.admin-pill { padding: 3px 9px; border-radius: 999px; font: 600 11px var(--font); }
+.pill-training, .pill-queued, .pill-running { background: var(--warn-tint); color: var(--warn-ink); }
+.pill-ready, .pill-done { background: var(--accent-tint); color: var(--accent); }
+.pill-active { background: var(--ink); color: #fff; }
+.pill-failed { background: var(--bad-tint); color: var(--bad-ink); }
+.pill-archived { background: var(--unscanned-tint); color: var(--unscanned-ink); }
