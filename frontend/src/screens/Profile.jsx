@@ -30,7 +30,7 @@ export default function Profile() {
   const rows = greenhouse
     ? [
         { label: "Дақылдар", value: greenhouse.crop?.name || "—" },
-        { label: "Секторлар", value: `${greenhouse.rows}×${greenhouse.cols}` },
+        { label: "Секторлар", value: greenhouse.preset_label || `${greenhouse.sectors.length} сектор` },
         { label: "QR белгілер", value: "Қайта басып шығару", to: "/setup/qr" },
         { label: "Шолу еске салғышы", value: `${user?.scan_reminder_days || 7} күнде бір` },
         { label: "Тіл", value: "Қазақша" },

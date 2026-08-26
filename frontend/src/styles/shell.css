@@ -70,9 +70,6 @@
   align-items: center; gap: 5px; padding: 6px 0; color: #9AA5A2;
 }
 .tab-btn.active { color: var(--accent); }
-.tab-icon-square { width: 19px; height: 19px; border-radius: 5px; border: 2px solid currentColor; }
-.tab-icon-circle { width: 19px; height: 19px; border-radius: 50%; border: 2px solid currentColor; }
-.tab-icon-rect { width: 19px; height: 14px; border-radius: 3px; border: 2px solid currentColor; }
 .tab-label { font: 600 10.5px var(--font); }
 
 /* Buttons */

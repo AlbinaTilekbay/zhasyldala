@@ -33,8 +33,19 @@ class Greenhouse(models.Model):
     name = models.CharField(max_length=255)
     crop = models.ForeignKey(Crop, on_delete=models.SET_NULL, null=True, blank=True, related_name="greenhouses")
     rows = models.PositiveSmallIntegerField(default=3)
+    # `cols` is the grid's *widest* row once row_counts is set (real
+    # greenhouses aren't always a clean rectangle — a row can end early
+    # against a wall, a path, or a support post). Kept for the handful of
+    # places that just want "how wide is this, roughly" (the QR-sheet PDF
+    # layout, mostly) — the real per-row shape lives in row_counts.
     cols = models.PositiveSmallIntegerField(default=4)
-    preset_label = models.CharField(max_length=20, default="3×4")
+    # One entry per row, e.g. [6, 6, 4] — a 3-row greenhouse whose first
+    # two rows hold 6 sectors and whose third holds only 4. A plain
+    # rectangular preset/rows×cols choice just fills this with `cols`
+    # repeated `rows` times. Empty only for greenhouses created before
+    # this field existed and never regenerated.
+    row_counts = models.JSONField(default=list, blank=True)
+    preset_label = models.CharField(max_length=40, default="3×4")
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -43,14 +54,19 @@ class Greenhouse(models.Model):
     def __str__(self):
         return self.name
 
-    def generate_sectors(self, plants_base=40):
-        """(Re)creates the sector grid for this greenhouse using rows/cols,
-        matching the mockup's `sectors()` labeling: row letters A, B, C… x
-        column numbers 1..cols."""
+    def generate_sectors(self, plants_base=40, row_counts=None):
+        """(Re)creates the sector grid for this greenhouse, matching the
+        mockup's `sectors()` labeling: row letters A, B, C… x sector
+        numbers 1..N *within that row*. `row_counts` (one sector count per
+        row) lets a row be shorter than the others — pass it explicitly
+        for an irregular/jagged layout; omitted, it falls back to `cols`
+        repeated `rows` times (a plain rectangle, the old behavior)."""
+        counts = list(row_counts) if row_counts else [self.cols] * self.rows
         self.sectors.all().delete()
         sectors = []
-        for i in range(self.rows):
-            for j in range(self.cols):
+        seq = 0
+        for i, count in enumerate(counts):
+            for j in range(count):
                 label = f"{ROW_LETTERS[i]}{j + 1}"
                 sectors.append(
                     Sector(
@@ -58,9 +74,10 @@ class Greenhouse(models.Model):
                         row=i,
                         col=j,
                         label=label,
-                        plant_count=plants_base + ((i * self.cols + j) % 5) * 6,
+                        plant_count=plants_base + (seq % 5) * 6,
                     )
                 )
+                seq += 1
         Sector.objects.bulk_create(sectors)
         return list(self.sectors.order_by("row", "col"))
 

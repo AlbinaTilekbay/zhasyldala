@@ -7,9 +7,22 @@ import AppShell from "../../components/AppShell";
 import { PrimaryButton } from "../../components/ui";
 import { useSetupStore } from "../../store/useSetupStore";
 
-function chunk(list, size) {
+// Groups sectors by their actual `row` instead of chunking the flat list
+// by a fixed width — a greenhouse's rows aren't always the same length
+// (see GridSetup.jsx's "Өзім жазамын" custom row-count mode), so a fixed
+// chunk size would cut a row's sectors across two visual rows or merge
+// two short rows into one. `greenhouse.sectors` already arrives ordered
+// by (row, col) from the backend.
+function groupByRow(sectors) {
   const out = [];
-  for (let i = 0; i < list.length; i += size) out.push(list.slice(i, i + size));
+  let currentRow = null;
+  for (const s of sectors) {
+    if (s.row !== currentRow) {
+      out.push([]);
+      currentRow = s.row;
+    }
+    out[out.length - 1].push(s);
+  }
   return out;
 }
 
@@ -44,7 +57,7 @@ export default function QrCodes() {
     navigate("/app");
   }
 
-  const rows = greenhouse ? chunk(greenhouse.sectors, greenhouse.cols) : [];
+  const rows = greenhouse ? groupByRow(greenhouse.sectors) : [];
 
   return (
     <AppShell>

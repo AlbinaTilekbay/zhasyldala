@@ -45,22 +45,31 @@ class GreenhouseViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=["post"], url_path="sectors/generate")
     def generate_sectors(self, request, pk=None):
-        """Body: {preset_label} or {rows, cols}. Mirrors the mockup's
-        3rd registration step ("Жылыжайды бөлу")."""
+        """Body: {preset_label}, {rows, cols} or {row_counts: [6, 6, 4]}.
+        Mirrors the mockup's 3rd registration step ("Жылыжайды бөлу") —
+        row_counts additionally supports a greenhouse whose rows aren't
+        all the same length."""
         greenhouse = self.get_object()
         serializer = ApplyPresetSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
 
-        if "preset_label" in data:
+        if "row_counts" in data:
+            row_counts = data["row_counts"]
+            rows, cols = len(row_counts), max(row_counts)
+            label = f"{rows}×{cols}" if len(set(row_counts)) == 1 else "+".join(str(c) for c in row_counts)
+        elif "preset_label" in data:
             preset = next(p for p in GRID_PRESETS if p["label"] == data["preset_label"])
             rows, cols, label = preset["rows"], preset["cols"], preset["label"]
+            row_counts = [cols] * rows
         else:
-            rows, cols, label = data["rows"], data["cols"], f'{data["rows"]}×{data["cols"]}'
+            rows, cols = data["rows"], data["cols"]
+            label = f"{rows}×{cols}"
+            row_counts = [cols] * rows
 
-        greenhouse.rows, greenhouse.cols, greenhouse.preset_label = rows, cols, label
-        greenhouse.save(update_fields=["rows", "cols", "preset_label"])
-        sectors = greenhouse.generate_sectors()
+        greenhouse.rows, greenhouse.cols, greenhouse.row_counts, greenhouse.preset_label = rows, cols, row_counts, label
+        greenhouse.save(update_fields=["rows", "cols", "row_counts", "preset_label"])
+        sectors = greenhouse.generate_sectors(row_counts=row_counts)
         return Response(SectorSerializer(sectors, many=True).data, status=status.HTTP_201_CREATED)
 
     @action(detail=True, methods=["get"], url_path="sectors/qr-sheet.pdf")
