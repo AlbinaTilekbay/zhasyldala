@@ -132,7 +132,7 @@ TIME_ZONE = os.environ.get("DJANGO_TIME_ZONE", "Asia/Almaty")
 USE_I18N = True
 USE_TZ = True
 
-STATIC_URL = "static/"
+STATIC_URL = "/static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
 STORAGES = {
     # Setting STORAGES at all replaces Django's built-in default wholesale —
@@ -154,7 +154,22 @@ _FRONTEND_DIST = BASE_DIR / "frontend_dist"
 if _FRONTEND_DIST.exists():
     WHITENOISE_ROOT = _FRONTEND_DIST
 
-MEDIA_URL = "media/"
+MEDIA_URL = "/media/"
+# The leading slash above matters a lot more than it looks: DRF's
+# ImageField.to_representation() builds the URL the frontend receives as
+# request.build_absolute_uri(value.url). When MEDIA_URL has no leading
+# slash, value.url comes back as a *document-relative* path like
+# "media/leaf.jpg", and build_absolute_uri() resolves a relative path
+# against the current request's own URL, not the site root — so a POST to
+# /api/diagnose/anonymous/ produced photo URLs like
+# ".../api/diagnose/anonymous/media/leaf.jpg" (a 404) instead of
+# ".../media/leaf.jpg". That 404 is exactly what showed up as the broken
+# image icon on the result screen — every other part of the media-serving
+# setup (urls.py routing, MEDIA_ROOT, the STORAGES fix) was already
+# correct, so it never showed up in those files. With a leading slash,
+# value.url is root-relative ("/media/leaf.jpg") and build_absolute_uri()
+# resolves it correctly regardless of which endpoint generated it.
+#
 # Mount a persistent volume here in production (e.g. a Railway Volume at
 # /app/media) — otherwise uploaded photos and trained model weights are
 # lost on every redeploy, since container filesystems are ephemeral.

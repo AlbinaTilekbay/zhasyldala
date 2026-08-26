@@ -33,7 +33,13 @@ from django.conf import settings
 logger = logging.getLogger(__name__)
 
 CHAT_URL = "https://api.openai.com/v1/chat/completions"
-MODEL = "gpt-4o-mini"
+# gpt-4o-mini's vision recognition proved too weak in practice — it kept
+# answering "species unclear" even on ordinary, clearly-lit houseplant
+# photos. gpt-4o is noticeably better at fine-grained visual ID (exactly
+# what this app needs) for a modest cost increase — still well under a
+# cent's worth of tokens per diagnosis, since each call sends one photo
+# plus a short prompt.
+MODEL = "gpt-4o"
 
 SEVERITY_VALUES = {"ok", "warn", "bad"}
 DISEASE_TYPE_VALUES = {"бактериялық", "вирустық", "саңырауқұлақтық", "физиологиялық"}
@@ -139,7 +145,7 @@ def diagnose(image_path: str, crop_name: str | None = None) -> dict | None:
                         "role": "user",
                         "content": [
                             {"type": "text", "text": user_text},
-                            {"type": "image_url", "image_url": {"url": data_url}},
+                            {"type": "image_url", "image_url": {"url": data_url, "detail": "high"}},
                         ],
                     },
                 ],
