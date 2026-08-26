@@ -23,8 +23,14 @@ urlpatterns = [
     path("api/admin/", include("apps.ml_training.urls")),
 ]
 
-if settings.DEBUG:
-    urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
+# Gating this behind DEBUG (as it was) meant uploaded photos and trained
+# model weights had no URL route at all in production (DJANGO_DEBUG=False
+# on Railway) — every /media/... request fell through to the SPA catch-all
+# below and returned index.html instead of the file, so result screens
+# and the admin dataset never showed images. Django serving media itself
+# isn't ideal at large scale, but it's the right tradeoff for a project
+# this size rather than standing up a separate file host.
+urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
 
 
 def frontend_index(request, *args, **kwargs):

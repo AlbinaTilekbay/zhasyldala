@@ -16,7 +16,7 @@ class DiagnosisSerializer(serializers.ModelSerializer):
         model = Diagnosis
         fields = [
             "id", "disease", "severity", "confidence", "species_guess",
-            "symptoms_seen", "recommendations", "source", "created_at",
+            "symptoms_seen", "recommendations", "source", "ai_narrative", "created_at",
         ]
 
 

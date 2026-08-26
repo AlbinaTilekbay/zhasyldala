@@ -33,6 +33,7 @@ def run_diagnosis(diagnosis_request_id: int):
                 "recommendations": result["recommendations"],
                 "source": result["source"],
                 "model_version": result.get("model_version"),
+                "ai_narrative": result.get("ai_narrative"),
             },
         )
         req.status = DiagnosisRequest.Status.DONE

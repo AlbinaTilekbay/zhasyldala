@@ -4,7 +4,7 @@ import { api, mediaUrl } from "../api/client";
 import AppShell from "../components/AppShell";
 import BottomTabBar from "../components/BottomTabBar";
 import { TopBar } from "../components/TopBar";
-import { BulletList, NumberedList, PrimaryButton } from "../components/ui";
+import { AiNarrative, BulletList, NumberedList, PrimaryButton, narrativeHasCards } from "../components/ui";
 
 const TAG_STYLE = {
   ok: { bg: "var(--accent-tint)", bd: "rgba(15,118,110,.18)", fg: "var(--accent)" },
@@ -67,11 +67,15 @@ export default function SectorDetail() {
           </div>
         )}
 
-        {detail.recommendations.length > 0 && (
-          <div className="card card-lg">
-            <div style={{ font: "700 14px var(--font)", marginBottom: 11 }}>Кеңестер</div>
-            <NumberedList items={detail.recommendations} />
-          </div>
+        {narrativeHasCards(detail.ai_narrative) ? (
+          <AiNarrative narrative={detail.ai_narrative} />
+        ) : (
+          detail.recommendations.length > 0 && (
+            <div className="card card-lg">
+              <div style={{ font: "700 14px var(--font)", marginBottom: 11 }}>Кеңестер</div>
+              <NumberedList items={detail.recommendations} />
+            </div>
+          )
         )}
 
         {(detail.tag === "warn" || detail.tag === "bad") && (

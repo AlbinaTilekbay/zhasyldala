@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { api, mediaUrl } from "../../api/client";
 import AppShell from "../../components/AppShell";
 import { BackButton } from "../../components/TopBar";
-import { AiNarrative, NumberedList, PrimaryButton, SeverityBadge, Spinner } from "../../components/ui";
+import { AiNarrative, BulletList, NumberedList, PrimaryButton, SeverityBadge, Spinner, narrativeHasCards } from "../../components/ui";
 import { useCamera } from "../../hooks/useCamera";
 
 // Ports the mockup's plant_capture -> plant_analyzing -> plant_result
@@ -155,11 +155,21 @@ export default function HomePlantFlow() {
   // threw that content away and always showed the generic "no disease
   // found" placeholder even when a full real answer came back.
   const isAiResult = diag?.source === "openai_vision";
-  const adviceItems = disease?.home_care_advice?.length
+  const showCards = narrativeHasCards(narrative);
+  let adviceTitle = "Не істеу керек";
+  let adviceItems = disease?.home_care_advice?.length
     ? disease.home_care_advice
     : diag?.recommendations?.length
       ? diag.recommendations
-      : ["Күтімді жалғастырыңыз."];
+      : null;
+  if (!adviceItems && diag?.symptoms_seen?.length) {
+    // The narrative cards had nothing (model left cause/treatment blank),
+    // but it did see something — show that instead of a content-free
+    // generic message, under an honest heading rather than "what to do".
+    adviceTitle = "Байқалған белгілер";
+    adviceItems = diag.symptoms_seen;
+  }
+  if (!adviceItems) adviceItems = ["Күтімді жалғастырыңыз."];
 
   return (
     <AppShell>
@@ -187,16 +197,16 @@ export default function HomePlantFlow() {
               {disease?.name || narrative?.condition_name || (isAiResult ? diag?.species_guess || "Нәтиже белгісіз" : "Ауру белгісі табылмады")}
             </div>
             <div className="subtle">
-              {disease?.description || narrative?.description || (isAiResult ? "Толығырақ — төменде." : "Өсімдік қалыпты көрінеді.")}
+              {disease?.description || narrative?.description || (isAiResult ? (showCards ? "Толығырақ — төменде." : "") : "Өсімдік қалыпты көрінеді.")}
             </div>
           </div>
         </div>
-        {diag?.ai_narrative ? (
-          <AiNarrative narrative={diag.ai_narrative} />
+        {showCards ? (
+          <AiNarrative narrative={narrative} />
         ) : (
           <div className="card card-lg">
-            <div style={{ font: "700 14px var(--font)", marginBottom: 12 }}>Не істеу керек</div>
-            <NumberedList items={adviceItems} />
+            <div style={{ font: "700 14px var(--font)", marginBottom: 12 }}>{adviceTitle}</div>
+            {adviceTitle === "Байқалған белгілер" ? <BulletList items={adviceItems} /> : <NumberedList items={adviceItems} />}
           </div>
         )}
         <button className="btn btn-ghost" onClick={() => navigate("/register")}>

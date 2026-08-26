@@ -13,9 +13,28 @@ export function useCamera({ facingMode = "environment" } = {}) {
   const start = useCallback(async () => {
     // Idempotent: a caller that starts the camera again while it's already
     // running (e.g. a step-change effect re-firing) reuses the existing
-    // stream instead of tearing it down and re-acquiring — see the
-    // scan_confirm -> scan_video note below for why that matters.
+    // stream instead of tearing it down and re-acquiring. But ScanFlow's
+    // steps each render their OWN <video> element — scan_qr and scan_video
+    // are separate JSX branches (scan_confirm renders none at all), so
+    // going scan_qr -> scan_confirm -> scan_video mounts a brand new,
+    // blank <video> DOM node whose srcObject was never set, even though
+    // the underlying stream (and any in-progress recording) never stopped.
+    // That produced exactly the reported bug: a solid black preview during
+    // "Жазылып жатыр" while the timer/progress bar kept advancing normally,
+    // because recording itself uses the stream directly and doesn't care
+    // about the <video> element at all. Re-attaching here on every start()
+    // call — not just the first — fixes that without re-prompting for
+    // camera permission or restarting the recording.
     if (streamRef.current) {
+      if (videoRef.current && videoRef.current.srcObject !== streamRef.current) {
+        videoRef.current.srcObject = streamRef.current;
+        try {
+          await videoRef.current.play();
+        } catch {
+          // Autoplay can reject harmlessly (e.g. the element unmounts again
+          // right away on a fast step change) — the stream itself is fine.
+        }
+      }
       setReady(true);
       return;
     }
