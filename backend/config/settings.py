@@ -247,5 +247,10 @@ OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
 
 # Directory (inside MEDIA_ROOT) where trained model weights are stored.
 ML_MODELS_DIR = MEDIA_ROOT / "model_versions"
-# Number of frames sampled from an uploaded sector video for inference.
-ML_VIDEO_SAMPLE_FRAMES = int(os.environ.get("ML_VIDEO_SAMPLE_FRAMES", "5"))
+# A greenhouse sector is diagnosed from a set of still photos (not a video
+# — see apps/scans/views.py's sector_photos/finish_sector and
+# apps/ml/openai_vision.py's multi-photo group analysis): the farmer must
+# take at least SECTOR_PHOTOS_MIN before finishing a sector, and can take
+# up to SECTOR_PHOTOS_MAX.
+SECTOR_PHOTOS_MIN = int(os.environ.get("SECTOR_PHOTOS_MIN", "3"))
+SECTOR_PHOTOS_MAX = int(os.environ.get("SECTOR_PHOTOS_MAX", "10"))

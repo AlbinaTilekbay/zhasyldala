@@ -45,35 +45,65 @@ def run_diagnosis(diagnosis_request_id: int):
 
 
 @shared_task
-def process_sector_capture(sector_capture_id: int):
-    """Sector-video pipeline: sample a frame, create the DiagnosisRequest,
-    run inference. Split from run_diagnosis so a failed frame-sample
-    doesn't need to duplicate inference error handling."""
-    from apps.diagnosis.models import DiagnosisRequest
+def analyze_sector_capture(sector_capture_id: int):
+    """Sector photo-group pipeline: once a sector's 3-10 captured photos
+    are finished (apps/scans/views.py's finish_sector), this runs one
+    grouped diagnosis over all of them together via
+    apps.ml.services.diagnose_images — a single combined verdict for the
+    whole sector, not one per photo. Replaces the old video-frame-sampling
+    pipeline (apps/ml/video.py, removed): a handful of farmer-chosen
+    still photos turned out to give OpenAI vision much more reliable
+    material to work with than one frame auto-picked out of a 12s clip."""
+    from apps.diagnosis.models import Diagnosis, DiagnosisRequest
     from apps.scans.models import SectorCapture
 
-    from .video import sample_best_frame_for_capture
+    from .services import diagnose_images
 
-    capture = SectorCapture.objects.select_related("sector__greenhouse__crop", "session").get(pk=sector_capture_id)
+    capture = SectorCapture.objects.select_related("sector__greenhouse__crop", "session").prefetch_related(
+        "photos"
+    ).get(pk=sector_capture_id)
     capture.status = SectorCapture.Status.PROCESSING
     capture.save(update_fields=["status"])
 
-    if not sample_best_frame_for_capture(capture):
+    photos = list(capture.photos.all())
+    if not photos:
         capture.status = SectorCapture.Status.FAILED
         capture.save(update_fields=["status"])
-        return "no_frame"
+        return "no_photos"
 
-    req, _ = DiagnosisRequest.objects.update_or_create(
-        sector_capture=capture,
-        defaults={
-            "image": capture.frame_image,
-            "crop": capture.sector.greenhouse.crop,
-        },
-    )
-    run_diagnosis(req.id)  # run inline within this task, not another async hop
-    capture.status = SectorCapture.Status.DONE
+    try:
+        crop = capture.sector.greenhouse.crop
+        result = diagnose_images([p.image.path for p in photos], crop=crop)
+
+        req, _ = DiagnosisRequest.objects.update_or_create(
+            sector_capture=capture,
+            # The first captured photo doubles as the DiagnosisRequest's
+            # own "image" — used for the result screen / report thumbnail,
+            # same role a sampled video frame used to play.
+            defaults={"image": photos[0].image, "crop": crop},
+        )
+        Diagnosis.objects.update_or_create(
+            request=req,
+            defaults={
+                "disease": result["disease"],
+                "severity": result["severity"],
+                "confidence": result["confidence"],
+                "species_guess": result.get("species_guess", ""),
+                "symptoms_seen": result["symptoms_seen"],
+                "recommendations": result["recommendations"],
+                "source": result["source"],
+                "model_version": result.get("model_version"),
+                "ai_narrative": result.get("ai_narrative"),
+            },
+        )
+        req.status = DiagnosisRequest.Status.DONE
+        req.save(update_fields=["status"])
+        capture.status = SectorCapture.Status.DONE
+    except Exception:  # noqa: BLE001
+        logger.exception("Sector analysis failed for capture %s", sector_capture_id)
+        capture.status = SectorCapture.Status.FAILED
     capture.save(update_fields=["status"])
-    return "done"
+    return capture.status
 
 
 @shared_task

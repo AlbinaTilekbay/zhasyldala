@@ -1,16 +1,35 @@
 from rest_framework import serializers
 
-from .models import ScanSession, SectorCapture
+from .models import SECTOR_PHOTOS_MAX, SECTOR_PHOTOS_MIN, ScanSession, SectorCapture, SectorPhoto
+
+
+class SectorPhotoSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = SectorPhoto
+        fields = ["id", "image", "order"]
 
 
 class SectorCaptureSerializer(serializers.ModelSerializer):
     sector_label = serializers.CharField(source="sector.label", read_only=True)
+    photos = SectorPhotoSerializer(many=True, read_only=True)
+    photo_count = serializers.IntegerField(read_only=True)
+    min_photos = serializers.SerializerMethodField()
+    max_photos = serializers.SerializerMethodField()
     diagnosis = serializers.SerializerMethodField()
 
     class Meta:
         model = SectorCapture
-        fields = ["id", "session", "sector", "sector_label", "video", "frame_image", "status", "diagnosis", "created_at"]
-        read_only_fields = ["id", "frame_image", "status", "created_at"]
+        fields = [
+            "id", "session", "sector", "sector_label", "photos", "photo_count",
+            "min_photos", "max_photos", "status", "diagnosis", "created_at",
+        ]
+        read_only_fields = ["id", "status", "created_at"]
+
+    def get_min_photos(self, obj):
+        return SECTOR_PHOTOS_MIN
+
+    def get_max_photos(self, obj):
+        return SECTOR_PHOTOS_MAX
 
     def get_diagnosis(self, obj):
         from apps.diagnosis.serializers import DiagnosisSerializer

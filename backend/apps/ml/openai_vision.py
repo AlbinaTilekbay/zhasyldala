@@ -1,23 +1,30 @@
-"""Primary diagnosis engine: sends the plant/leaf photo directly to an
-OpenAI vision-capable chat model and asks it to both identify the plant
-and its condition AND produce the full, warm, human-readable explanation
-shown on the result screen — species, disease type, severity, confidence,
-symptoms, cause, treatment steps, prevention tips, a health/humidity/sun-
-stress status readout, and a short encouragement — all in one call. The
-prompt's structure and tone (masterful, literary Kazakh; a warm closing
-line either praising a healthy plant or encouraging treatment) are ported
-from a prompt the project's author had already proven out in a separate
-OpenAI-powered Telegram bot (via make.com) and confirmed gave good
-results there. No emoji in the text itself — the frontend renders this as
-its own set of clean cards instead (see apps/ml/services.py and
-frontend/src/components/ui.jsx's `AiNarrative`).
+"""Primary diagnosis engine: sends one or more plant/leaf photos directly
+to an OpenAI vision-capable chat model and asks it to both identify the
+plant and its condition AND produce the full, warm, human-readable
+explanation shown on the result screen — species, disease type, severity,
+confidence, symptoms, cause, treatment steps, prevention tips, a
+health/humidity/sun-stress status readout, and a short encouragement —
+all in one call. When several photos of the same subject are given (a
+greenhouse sector's 3-10 captured photos, taken from different angles),
+they're sent together in a single call and the model is instructed to
+give ONE combined verdict for the group, not a separate answer per photo
+— see diagnose()'s multi-photo user_text and the group-photo note in
+SYSTEM_PROMPT below. The prompt's structure and tone (masterful, literary
+Kazakh; a warm closing line either praising a healthy plant or
+encouraging treatment) are ported from a prompt the project's author had
+already proven out in a separate OpenAI-powered Telegram bot (via
+make.com) and confirmed gave good results there. No emoji in the text
+itself — the frontend renders this as its own set of clean cards instead
+(see apps/ml/services.py and frontend/src/components/ui.jsx's
+`AiNarrative`).
 
 This is the *primary* diagnosis path (see apps/ml/services.py:
-diagnose_image). The locally trained PlantVillage model
+diagnose_images). The locally trained PlantVillage model
 (apps/ml/model_def.py, apps/ml/registry.py) only takes over when this
 fails or OPENAI_API_KEY isn't set — most commonly because there's no
 internet connection: works fully online via OpenAI, and still gives a
-real (if narrower — currently tomato/pepper/strawberry) answer offline.
+real (if narrower — currently tomato/pepper/strawberry, and single-photo
+only) answer offline.
 
 No-ops (returns None) until OPENAI_API_KEY is set; never raises, so a
 network hiccup, rate limit, or a response that doesn't parse just falls
@@ -49,7 +56,11 @@ SYSTEM_PROMPT = (
     "Сен — қазақша сөйлейтін өсімдік-дәрігер ботсың. Қазақша шебер, көркем "
     "сөйлейсің — тап бір қазақ көркем әдебиетін оқитындай. Бірақ жауабыңда "
     "эмодзи қолданба — оны қосымшаның өзі көрсетеді. Саған өсімдіктің "
-    "немесе оның жапырағының фотосы беріледі. Фотоны мұқият қарап, "
+    "немесе оның жапырағының фотосы беріледі — кейде бір объектінің "
+    "(мысалы, бір сектордың) әртүрлі бұрыштан түсірілген бірнеше фотосы "
+    "бірге беріледі; олай болса әр фотоны бөлек сипаттама, барлығын бір "
+    "объектінің көріністері ретінде қарап, БІР жалпы қорытынды жаз. "
+    "Фотоны/фотоларды мұқият қарап, "
     "өсімдік түрін және ауру/зиянкес/қоректік зат тапшылығы белгілерін "
     "өзің анықта. Ауру болса, оның түрін дәл мына төрт санаттың бірімен "
     "белгіле: \"бактериялық\", \"вирустық\", \"саңырауқұлақтық\", "
@@ -65,6 +76,10 @@ SYSTEM_PROMPT = (
     '"severity": "ok" немесе "warn" немесе "bad", '
     '"confidence_percent": 0 мен 100 аралығындағы сан, '
     '"symptoms_seen": ["фотодан көрінген белгі 1", "белгі 2", ...], '
+    '"affected_photos": [бірнеше фото берілген болса, ауру/зиянкес белгісі '
+    'НАҚТЫ көрінген фотоның нөмірі(лері) — фотолар 1-ден бастап нөмірленеді, '
+    'берілген ретімен; барлық фото сау болса немесе тек бір ғана фото '
+    'берілсе — бос тізім []], '
     '"cause": "нақты, дәл осы фотоға қатысты түсініктеме — жалпы сөйлеммен '
     'шектелме. Ауру болса — нақты себеп пен белгісін нақты сипатта '
     '(мысалы, \'жапырақтың ұшындағы қоңыр дақтар саңырауқұлақ '
@@ -121,29 +136,62 @@ def _clean_level(value, allowed):
     return value if value in allowed else ""
 
 
-def diagnose(image_path: str, crop_name: str | None = None) -> dict | None:
-    """`crop_name` is the greenhouse crop's Kazakh name when known (e.g.
-    "Қызанақ"), or None for the anonymous home-plant flow (any houseplant).
-    Returns a dict shaped like the other diagnose_image() sources
-    (disease=None — this never maps onto the local Kazakh knowledge base —
-    severity, confidence, species_guess, symptoms_seen, recommendations,
-    source="openai_vision", model_version=None) plus "ai_narrative" with
-    the full card content (condition_name, disease_type, description,
-    cause, treatment_steps, prevention_tips, health_percent,
-    humidity_level, sun_stress_level, encouragement), or None if the key
-    isn't set, the request fails, or nothing usable came back — so the
-    caller falls through to the offline custom model."""
-    if not settings.OPENAI_API_KEY:
+def diagnose(image_paths, crop_name: str | None = None) -> dict | None:
+    """`image_paths` is a list of one or more photos of the SAME sector /
+    plant, taken from different angles — a greenhouse sector's several
+    captured photos are sent together in one call and judged as a group
+    (see the module docstring and SYSTEM_PROMPT's multi-photo note), not
+    one diagnosis per photo. The anonymous home-plant flow just passes a
+    single-item list. `crop_name` is the greenhouse crop's Kazakh name
+    when known (e.g. "Қызанақ"), or None for the anonymous home-plant flow
+    (any houseplant). Returns a dict shaped like the other
+    diagnose_images() sources (disease=None — this never maps onto the
+    local Kazakh knowledge base — severity, confidence, species_guess,
+    symptoms_seen, recommendations, source="openai_vision",
+    model_version=None) plus "ai_narrative" with the full card content
+    (condition_name, disease_type, description, cause, treatment_steps,
+    prevention_tips, health_percent, humidity_level, sun_stress_level,
+    encouragement), or None if the key isn't set, no images were given,
+    the request fails, or nothing usable came back — so the caller falls
+    through to the offline custom model."""
+    if not settings.OPENAI_API_KEY or not image_paths:
         return None
 
-    user_text = (
-        f"Бұл жылыжайдағы {crop_name} дақылының фотосы."
-        if crop_name
-        else "Бұл үй өсімдігінің фотосы (нақты дақыл көрсетілмеген)."
-    )
+    multi = len(image_paths) > 1
+    if crop_name and multi:
+        user_text = (
+            f"Бұл жылыжайдағы {crop_name} дақылының бір секторынан түсірілген "
+            f"{len(image_paths)} фото — сектордың әртүрлі жерінен/бұрышынан "
+            "алынған. Барлық фотоны бірге қарап, осы СЕКТОРДЫҢ ЖАЛПЫ жағдайы "
+            "туралы БІР қорытынды жаса (әр фотоны бөлек сипаттама). Егер тым "
+            "болмаса бір фотода ауру/зиянкес/қоректік зат тапшылығы белгісі "
+            "көрінсе, соны ескер және жалпы бағаға көрсет — барлық фото шынымен "
+            'сау көрінгенде ғана "Дені сау" деп жаз.'
+        )
+    elif crop_name:
+        user_text = f"Бұл жылыжайдағы {crop_name} дақылының фотосы."
+    elif multi:
+        user_text = (
+            f"Бұл бір өсімдіктің/аймақтың {len(image_paths)} түрлі фотосы — "
+            "әртүрлі бұрыштан түсірілген. Барлығын бірге қарап, өсімдіктің "
+            "ЖАЛПЫ жағдайы туралы бір қорытынды жаса."
+        )
+    else:
+        user_text = "Бұл үй өсімдігінің фотосы (нақты дақыл көрсетілмеген)."
+
+    # A single photo (the home-plant flow, or a lone sector shot) gets
+    # "high" detail for the most careful possible read. Several photos at
+    # once (a sector's group) use "auto" instead — "high" on every one of
+    # up to SECTOR_PHOTOS_MAX images would multiply both cost and latency
+    # for marginal benefit once there's already several angles to work
+    # from.
+    detail = "high" if not multi else "auto"
+    image_blocks = [
+        {"type": "image_url", "image_url": {"url": _encode_image(p), "detail": detail}}
+        for p in image_paths
+    ]
 
     try:
-        data_url = _encode_image(image_path)
         response = requests.post(
             CHAT_URL,
             headers={
@@ -156,17 +204,14 @@ def diagnose(image_path: str, crop_name: str | None = None) -> dict | None:
                     {"role": "system", "content": SYSTEM_PROMPT},
                     {
                         "role": "user",
-                        "content": [
-                            {"type": "text", "text": user_text},
-                            {"type": "image_url", "image_url": {"url": data_url, "detail": "high"}},
-                        ],
+                        "content": [{"type": "text", "text": user_text}, *image_blocks],
                     },
                 ],
                 "response_format": {"type": "json_object"},
                 "temperature": 0.3,
                 "max_tokens": 1000,
             },
-            timeout=30,
+            timeout=45 if multi else 30,
         )
         response.raise_for_status()
         content = response.json()["choices"][0]["message"]["content"]
@@ -195,6 +240,26 @@ def diagnose(image_path: str, crop_name: str | None = None) -> dict | None:
         treatment_steps = [str(s).strip() for s in (data.get("treatment_steps") or []) if str(s).strip()]
         species_guess = str(data.get("species") or "").strip()
         symptoms_seen = [str(s).strip() for s in (data.get("symptoms_seen") or []) if str(s).strip()]
+
+        # 1-based positions (matching the order photos were sent in) of
+        # whichever photos the model actually saw the problem in — only
+        # meaningful when several photos were sent together (a sector's
+        # group). Clamped to the real range and de-duplicated so a
+        # hallucinated/out-of-range number can't break the frontend's
+        # thumbnail highlighting.
+        affected_photos = []
+        if multi:
+            seen = set()
+            for raw in data.get("affected_photos") or []:
+                try:
+                    n = int(raw)
+                except (TypeError, ValueError):
+                    continue
+                if 1 <= n <= len(image_paths) and n not in seen:
+                    seen.add(n)
+                    affected_photos.append(n)
+            affected_photos.sort()
+
         narrative = {
             "condition_name": str(data.get("condition_name") or "").strip(),
             "disease_type": disease_type,
@@ -206,6 +271,7 @@ def diagnose(image_path: str, crop_name: str | None = None) -> dict | None:
             "humidity_level": _clean_level(data.get("humidity_level"), LEVEL_VALUES),
             "sun_stress_level": _clean_level(data.get("sun_stress_level"), LEVEL_VALUES),
             "encouragement": str(data.get("encouragement") or "").strip(),
+            "affected_photos": affected_photos,
         }
         # Discard only if the model gave back essentially nothing at all —
         # a response that at least names the species/symptoms but left the

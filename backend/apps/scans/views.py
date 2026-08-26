@@ -6,7 +6,7 @@ from rest_framework.response import Response
 
 from apps.greenhouses.models import Greenhouse, Sector
 
-from .models import ScanSession, SectorCapture
+from .models import SECTOR_PHOTOS_MAX, SECTOR_PHOTOS_MIN, ScanSession, SectorCapture, SectorPhoto
 from .serializers import ScanSessionSerializer, SectorCaptureSerializer
 
 
@@ -23,22 +23,76 @@ class ScanSessionViewSet(viewsets.ModelViewSet):
         session = ScanSession.objects.create(greenhouse=greenhouse)
         return Response(ScanSessionSerializer(session).data, status=status.HTTP_201_CREATED)
 
-    @action(detail=True, methods=["post"])
-    def captures(self, request, pk=None):
-        """multipart: {sector, video} — one sector's 12s walkthrough clip.
-        Kicks off async frame-sampling + diagnosis (apps.ml.tasks)."""
+    @action(detail=True, methods=["post"], url_path=r"sectors/(?P<sector_id>[^/.]+)/photos")
+    def sector_photos(self, request, pk=None, sector_id=None):
+        """multipart {image} — adds one photo (of up to SECTOR_PHOTOS_MAX)
+        to this sector's in-progress capture for this session, creating it
+        on the first photo. Mirrors the mockup's step-by-step capture
+        screen, one photo at a time, instead of the old single 12s video
+        upload."""
         session = self.get_object()
-        sector = get_object_or_404(Sector, pk=request.data.get("sector"), greenhouse=session.greenhouse)
-        capture, _ = SectorCapture.objects.update_or_create(
-            session=session, sector=sector,
-            defaults={"video": request.data.get("video"), "status": SectorCapture.Status.UPLOADED},
-        )
+        sector = get_object_or_404(Sector, pk=sector_id, greenhouse=session.greenhouse)
+        capture, _ = SectorCapture.objects.get_or_create(session=session, sector=sector)
 
-        from apps.ml.tasks import process_sector_capture
+        if capture.status != SectorCapture.Status.IN_PROGRESS:
+            return Response(
+                {"detail": "Бұл сектор түсіру аяқталды — жаңа фото қосу мүмкін емес."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if capture.photo_count >= SECTOR_PHOTOS_MAX:
+            return Response(
+                {"detail": f"Бір секторға ең көбі {SECTOR_PHOTOS_MAX} фото түсіруге болады."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        image = request.data.get("image")
+        if not image:
+            return Response({"detail": "Фото жіберілмеді."}, status=status.HTTP_400_BAD_REQUEST)
 
-        process_sector_capture.delay(capture.id)
+        SectorPhoto.objects.create(capture=capture, image=image, order=capture.photo_count)
         capture.refresh_from_db()
         return Response(SectorCaptureSerializer(capture).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=["post"], url_path=r"sectors/(?P<sector_id>[^/.]+)/photos/undo")
+    def sector_photos_undo(self, request, pk=None, sector_id=None):
+        """Removes the most recently added photo for this sector — lets the
+        farmer discard an obviously bad shot (glare, thumb in frame, wrong
+        plant) before finishing, without starting the whole sector over."""
+        session = self.get_object()
+        sector = get_object_or_404(Sector, pk=sector_id, greenhouse=session.greenhouse)
+        capture = get_object_or_404(SectorCapture, session=session, sector=sector)
+        if capture.status != SectorCapture.Status.IN_PROGRESS:
+            return Response(
+                {"detail": "Бұл сектор түсіру аяқталды."}, status=status.HTTP_400_BAD_REQUEST
+            )
+        last = capture.photos.order_by("-order", "-id").first()
+        if last:
+            last.delete()
+        capture.refresh_from_db()
+        return Response(SectorCaptureSerializer(capture).data)
+
+    @action(detail=True, methods=["post"], url_path=r"sectors/(?P<sector_id>[^/.]+)/finish")
+    def finish_sector(self, request, pk=None, sector_id=None):
+        """"Сектор дайын" — closes photo capture for this sector (requires
+        at least SECTOR_PHOTOS_MIN photos already uploaded) and runs one
+        grouped diagnosis over all of them together (apps.ml.tasks.
+        analyze_sector_capture -> apps.ml.services.diagnose_images)."""
+        session = self.get_object()
+        sector = get_object_or_404(Sector, pk=sector_id, greenhouse=session.greenhouse)
+        capture = get_object_or_404(SectorCapture, session=session, sector=sector)
+
+        if capture.photo_count < SECTOR_PHOTOS_MIN:
+            return Response(
+                {"detail": f"Кемінде {SECTOR_PHOTOS_MIN} фото түсіру керек (қазір {capture.photo_count})."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        from apps.ml.tasks import analyze_sector_capture
+
+        capture.status = SectorCapture.Status.PROCESSING
+        capture.save(update_fields=["status"])
+        analyze_sector_capture.delay(capture.id)
+        capture.refresh_from_db()
+        return Response(SectorCaptureSerializer(capture).data)
 
     @action(detail=True, methods=["post"])
     def finish(self, request, pk=None):
@@ -102,11 +156,21 @@ class ScanSessionViewSet(viewsets.ModelViewSet):
         "Жүйе не көрді" / "Кеңестер" sector-detail screen."""
         session = self.get_object()
         sector = get_object_or_404(Sector, pk=sector_id, greenhouse=session.greenhouse)
-        capture = SectorCapture.objects.filter(session=session, sector=sector).first()
+        capture = SectorCapture.objects.filter(session=session, sector=sector).prefetch_related("photos").first()
         diagnosis = None
         if capture:
             request_obj = getattr(capture, "diagnosis_request", None)
             diagnosis = getattr(request_obj, "result", None) if request_obj else None
+        cover = capture.cover_image if capture else None
+        # Full photo list (in the same 1-based order they were sent to
+        # OpenAI) so the screen can show every photo of the sector, not
+        # just the cover — needed to highlight exactly which one(s) the
+        # model saw the problem in (diagnosis.ai_narrative.affected_photos,
+        # see apps/ml/openai_vision.py).
+        photos = (
+            [{"id": p.id, "url": p.image.url, "position": p.order + 1} for p in capture.photos.all()]
+            if capture else []
+        )
 
         if diagnosis is None:
             return Response({
@@ -119,7 +183,8 @@ class ScanSessionViewSet(viewsets.ModelViewSet):
                 "symptoms": [],
                 "recommendations": ["Қазіргі күтімді жалғастырыңыз."] if capture else [],
                 "ai_narrative": None,
-                "frame_image": capture.frame_image.url if capture and capture.frame_image else None,
+                "frame_image": cover.url if cover else None,
+                "photos": photos,
             })
 
         tag_text = {"ok": "Қалыпты", "warn": "Қауіп бар", "bad": "Ауру"}[diagnosis.severity]
@@ -134,5 +199,6 @@ class ScanSessionViewSet(viewsets.ModelViewSet):
             "symptoms": diagnosis.symptoms_seen,
             "recommendations": diagnosis.recommendations,
             "ai_narrative": diagnosis.ai_narrative,
-            "frame_image": capture.frame_image.url if capture.frame_image else None,
+            "frame_image": cover.url if cover else None,
+            "photos": photos,
         })

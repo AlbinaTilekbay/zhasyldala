@@ -1,17 +1,28 @@
 import jsQR from "jsqr";
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { api } from "../../api/client";
+import { api, mediaUrl } from "../../api/client";
 import { PrimaryButton, Spinner } from "../../components/ui";
 import { useCamera } from "../../hooks/useCamera";
 
-const REC_SECONDS = 12;
+// Matches the backend defaults (config/settings.py SECTOR_PHOTOS_MIN/MAX)
+// — used only before the first photo of a sector is uploaded, since only
+// then do we have the server's own capture.min_photos/max_photos to go by.
+const DEFAULT_MIN_PHOTOS = 3;
+const DEFAULT_MAX_PHOTOS = 10;
 
-// Neither MediaRecorder.stop() nor fetch() are guaranteed to ever settle
-// (a stalled connection, or the recorder's 'stop' event not firing in some
-// browser) — without a hard timeout either of those can leave the screen
-// waiting forever with no way out, which is exactly what looked like the
-// app "hanging" after recording. This guarantees an error surfaces instead.
+// Guided hints for the first 3 required photos — after that the farmer
+// decides for themself whether the sector needs more angles or is done.
+// Filming one 12s video and auto-picking a frame from it turned out to
+// give OpenAI vision unreliable material (motion blur, bad framing at
+// whatever moment got sampled) — a few farmer-chosen still photos from
+// specific, guided angles give it much more to work with.
+const GUIDED_HINTS = [
+  "1-фото: сектордың жалпы көрінісін түсіріңіз — бірнеше түпті қамтыңыз.",
+  "2-фото: бір жапырақты жақыннан түсіріңіз — камераны 30–40 см қашықтықта ұстаңыз.",
+  "3-фото: жапырақтың астыңғы бетін немесе түптің түбірін түсіріңіз.",
+];
+
 function withTimeout(promise, ms, message) {
   return Promise.race([
     promise,
@@ -19,11 +30,11 @@ function withTimeout(promise, ms, message) {
   ]);
 }
 
-// Ports scan_qr -> scan_confirm -> scan_video -> (loop) -> scan_done ->
+// Ports scan_qr -> scan_confirm -> scan_photos -> (loop) -> scan_done ->
 // analyzing -> report as one local step machine driving real API calls
-// (create session, upload each sector's clip, finish, then the report
-// screen takes over). See the mockup's Component.go()/startRec()/
-// nextSector()/finishScan() for the reference state transitions.
+// (create session, upload each sector's photos one at a time, finish the
+// sector, then finish the whole walkthrough — the report screen takes
+// over from there).
 export default function ScanFlow() {
   const navigate = useNavigate();
   const camera = useCamera();
@@ -31,19 +42,13 @@ export default function ScanFlow() {
   const [sectors, setSectors] = useState([]);
   const [scannedIds, setScannedIds] = useState([]);
   const [current, setCurrent] = useState(null);
-  const [step, setStep] = useState("loading"); // loading|scan_qr|scan_confirm|scan_video|scan_done|analyzing
-  const [recElapsed, setRecElapsed] = useState(0);
-  const [recording, setRecording] = useState(false);
-  const [uploading, setUploading] = useState(false);
-  const [uploadError, setUploadError] = useState(null);
-  const recTimerRef = useRef(null);
+  const [step, setStep] = useState("loading"); // loading|scan_qr|scan_confirm|scan_photos|scan_done|analyzing
+  const [capture, setCapture] = useState(null); // this sector's SectorCapture, once the first photo is uploaded
+  const [capturing, setCapturing] = useState(false); // taking + uploading one photo
+  const [finishing, setFinishing] = useState(false); // finishing the sector (running diagnosis)
+  const [photoError, setPhotoError] = useState(null);
   const qrTimerRef = useRef(null);
   const canvasRef = useRef(document.createElement("canvas"));
-  // Holds the recorded clip between a failed upload attempt and its
-  // retry, so "Қайталап жүктеу" re-sends the same video instead of
-  // calling camera.stopRecording() again on an already-stopped recorder
-  // (which throws/hangs in some browsers).
-  const recordedBlobRef = useRef(null);
 
   useEffect(() => {
     (async () => {
@@ -57,18 +62,7 @@ export default function ScanFlow() {
   }, []);
 
   useEffect(() => {
-    // scan_confirm must keep the stream alive too, even though it doesn't
-    // render <video>: it used to fall through to camera.stop() here, so by
-    // the time startRec() below called camera.startRecording() the stream
-    // had already been torn down and camera.start() (triggered by the step
-    // changing to scan_video) hadn't finished re-acquiring it yet.
-    // startRecording() bails out silently when there's no stream, so no
-    // MediaRecorder was ever created — stopRecording() later resolved with
-    // null, and handing that to FormData.append() is exactly what produced
-    // "Argument 2 ('blobValue') to FormData.append must be an instance of
-    // Blob". camera.start() is a no-op once already running, so keeping it
-    // "on" across all three steps is cheap.
-    if (step === "scan_qr" || step === "scan_confirm" || step === "scan_video") camera.start();
+    if (step === "scan_qr" || step === "scan_confirm" || step === "scan_photos") camera.start();
     else camera.stop();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [step]);
@@ -102,6 +96,7 @@ export default function ScanFlow() {
     try {
       const sector = await api.get(`/api/sectors/by-token/${token}/`);
       setCurrent(sector);
+      setCapture(null);
       setStep("scan_confirm");
     } catch {
       // unresolved token — keep scanning
@@ -112,73 +107,64 @@ export default function ScanFlow() {
     const remaining = sectors.filter((s) => !scannedIds.includes(s.id));
     if (remaining.length === 0) return;
     setCurrent(remaining[0]);
-    setStep("scan_confirm");
+    setCapture(null);
+    setStep("scan_photos");
   }
 
-  function startRec() {
-    camera.startRecording();
-    recordedBlobRef.current = null;
-    setRecording(true);
-    setUploadError(null);
-    setRecElapsed(0);
-    recTimerRef.current = setInterval(() => {
-      setRecElapsed((prev) => {
-        const next = prev + 0.1;
-        if (next >= REC_SECONDS) clearInterval(recTimerRef.current);
-        return Math.min(REC_SECONDS, next);
-      });
-    }, 100);
-    setStep("scan_video");
-  }
-
-  async function advanceAfterRecording() {
-    if (uploading) return; // guard against double-tap while a request is in flight
-    clearInterval(recTimerRef.current);
-    setUploading(true);
-    setUploadError(null);
+  async function takePhoto() {
+    if (capturing) return;
+    setCapturing(true);
+    setPhotoError(null);
     try {
-      // Only stop the recorder once per clip — calling stopRecording()
-      // again on retry (after it's already stopped) throws/hangs in some
-      // browsers, so a retry re-sends the blob we already have instead.
-      if (!recordedBlobRef.current) {
-        recordedBlobRef.current = await withTimeout(
-          camera.stopRecording(), 8000, "Камера жауап бермей жатыр — қайталап көріңіз."
-        );
-        setRecording(false);
-      }
-
-      // Belt-and-suspenders: if no MediaRecorder ever actually started
-      // (camera not ready in time, permission hiccup, etc.) stopRecording()
-      // resolves with null instead of a Blob. Catch that here with a clear,
-      // retryable message instead of letting FormData.append() throw its
-      // low-level "must be an instance of Blob" error straight at the user.
-      if (!(recordedBlobRef.current instanceof Blob) || recordedBlobRef.current.size === 0) {
-        recordedBlobRef.current = null;
-        throw new Error("Видео жазылмады — камера дайын болмады. Қайталап көріңіз.");
-      }
-
+      const blob = await camera.capturePhoto();
+      if (!blob) throw new Error("Камера дайын емес — қайталап көріңіз.");
       const form = new FormData();
-      form.append("sector", current.id);
-      form.append("video", recordedBlobRef.current, `sector-${current.label}.webm`);
-      await withTimeout(
-        api.post(`/api/scan-sessions/${session.id}/captures/`, form, { isForm: true }),
-        30000, "Видео жүктелмеді — интернет байланысын тексеріп, қайталаңыз."
+      form.append("image", blob, `sector-${current.label}-${(capture?.photo_count || 0) + 1}.jpg`);
+      const updated = await withTimeout(
+        api.post(`/api/scan-sessions/${session.id}/sectors/${current.id}/photos/`, form, { isForm: true }),
+        20000, "Фото жүктелмеді — интернет байланысын тексеріп, қайталаңыз."
       );
+      setCapture(updated);
+    } catch (err) {
+      setPhotoError(err?.message || "Фото түсірілмеді. Қайталап көріңіз.");
+    } finally {
+      setCapturing(false);
+    }
+  }
 
-      recordedBlobRef.current = null;
+  async function undoLastPhoto() {
+    if (capturing || !capture || capture.photo_count === 0) return;
+    setCapturing(true);
+    setPhotoError(null);
+    try {
+      const updated = await api.post(`/api/scan-sessions/${session.id}/sectors/${current.id}/photos/undo/`, {});
+      setCapture(updated);
+    } catch (err) {
+      setPhotoError(err?.message || "Фотоны алып тастау сәтсіз аяқталды.");
+    } finally {
+      setCapturing(false);
+    }
+  }
+
+  async function finishSector() {
+    if (finishing) return;
+    setFinishing(true);
+    setPhotoError(null);
+    try {
+      await withTimeout(
+        api.post(`/api/scan-sessions/${session.id}/sectors/${current.id}/finish/`, {}),
+        45000, "Сектор талданбады — интернет байланысын тексеріп, қайталаңыз."
+      );
       const newScanned = [...scannedIds, current.id];
       setScannedIds(newScanned);
       setCurrent(null);
-
+      setCapture(null);
       if (newScanned.length >= sectors.length) setStep("scan_done");
       else setStep("scan_qr");
     } catch (err) {
-      // Without this, a failed/slow upload used to leave the screen
-      // exactly as-is with zero feedback — indistinguishable from a
-      // frozen app. Now it's a visible, retryable error instead.
-      setUploadError(err?.message || "Видео жүктелмеді. Интернет байланысын тексеріп, қайталаңыз.");
+      setPhotoError(err?.message || "Сектор талданбады. Интернет байланысын тексеріп, қайталаңыз.");
     } finally {
-      setUploading(false);
+      setFinishing(false);
     }
   }
 
@@ -191,7 +177,7 @@ export default function ScanFlow() {
       );
       navigate(`/app/report/${session.id}`);
     } catch (err) {
-      setUploadError(err?.message || "Есеп құрылмады. Интернет байланысын тексеріп, қайталаңыз.");
+      setPhotoError(err?.message || "Есеп құрылмады. Интернет байланысын тексеріп, қайталаңыз.");
       setStep(scannedIds.length > 0 ? "scan_done" : "scan_qr");
     }
   }
@@ -209,7 +195,7 @@ export default function ScanFlow() {
       <div style={{ height: "100dvh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 18, padding: 40, background: "var(--bg-shell)" }}>
         <Spinner />
         <div className="title-md">Есеп дайындалып жатыр</div>
-        <div className="subtle">Кадрлар сектор бойынша талданады</div>
+        <div className="subtle">Секторлар бойынша нәтижелер жиналуда</div>
       </div>
     );
   }
@@ -222,8 +208,8 @@ export default function ScanFlow() {
         <div className="subtle" style={{ maxWidth: 270 }}>
           Түсірілген сектор: {sectors.length} ішінен {scannedIds.length}. Түсірілмегендері есепте сұр болып қалады — кейін толықтыруға болады.
         </div>
-        {uploadError && (
-          <div style={{ font: "500 12.5px var(--font)", color: "var(--rec)", maxWidth: 270 }}>{uploadError}</div>
+        {photoError && (
+          <div style={{ font: "500 12.5px var(--font)", color: "var(--rec)", maxWidth: 270 }}>{photoError}</div>
         )}
         <PrimaryButton onClick={finishScan}>Есеп құру</PrimaryButton>
         <button className="btn btn-ghost" onClick={() => setStep("scan_qr")}>Қалған секторларды түсіру</button>
@@ -244,53 +230,88 @@ export default function ScanFlow() {
             </div>
           </div>
           <div style={{ background: "rgba(255,255,255,.07)", borderRadius: 16, padding: "14px 16px", font: "400 13px/1.6 var(--font)", color: "rgba(255,255,255,.75)" }}>
-            Енді 12 секундтық видео. Сектор бойымен асықпай жүріңіз, камераны жапырақтан 30–40 см ұстаңыз, түптің астын да түсіріңіз.
+            Енді кемінде {DEFAULT_MIN_PHOTOS} фото түсіресіз (ең көбі {DEFAULT_MAX_PHOTOS}) — әр қадамда не түсіру керегін көрсетеміз.
           </div>
         </div>
-        <button className="btn btn-on-dark" onClick={startRec}>Әрі қарай — түсіру</button>
+        <button className="btn btn-on-dark" onClick={() => setStep("scan_photos")}>Әрі қарай — түсіру</button>
       </div>
     );
   }
 
-  if (step === "scan_video") {
-    const pct = Math.round((recElapsed / REC_SECONDS) * 100);
-    const canAdvance = recElapsed >= REC_SECONDS;
+  // scan_photos
+  if (step === "scan_photos") {
+    const photoCount = capture?.photo_count || 0;
+    const minPhotos = capture?.min_photos ?? DEFAULT_MIN_PHOTOS;
+    const maxPhotos = capture?.max_photos ?? DEFAULT_MAX_PHOTOS;
+    const canFinish = photoCount >= minPhotos;
+    const atMax = photoCount >= maxPhotos;
+    const hint = photoCount < GUIDED_HINTS.length
+      ? GUIDED_HINTS[photoCount]
+      : atMax
+        ? `Ең көп фото саны (${maxPhotos}) жетті — енді "Сектор дайын" батырмасын басыңыз.`
+        : `Қаласаңыз, тағы фото қосыңыз (ең көбі ${maxPhotos}), немесе осымен жеткілікті болса — "Сектор дайын" басыңыз.`;
+
     return (
       <div style={{ height: "100dvh", display: "flex", flexDirection: "column", background: "var(--bg-shell-darker)", color: "#fff" }}>
         <div style={{ padding: "6px 20px 12px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <div style={{ width: 9, height: 9, borderRadius: "50%", background: "var(--rec)", animation: "gg-rec 1s infinite" }} />
-            <div style={{ font: "600 13.5px var(--font)" }}>Жазылып жатыр · {current?.label}</div>
-          </div>
-          <div style={{ font: "700 15px var(--mono)" }}>
-            00:{String(Math.max(0, Math.ceil(REC_SECONDS - recElapsed))).padStart(2, "0")}
-          </div>
+          <div style={{ font: "600 13.5px var(--font)" }}>{current?.label} секторы</div>
+          <div style={{ font: "700 13.5px var(--mono)", color: "var(--scan-line)" }}>{photoCount}/{maxPhotos}</div>
         </div>
         <div style={{ flex: 1, padding: "0 16px", display: "flex", alignItems: "center" }}>
           <div style={{ width: "100%", aspectRatio: "3/4", borderRadius: 20, overflow: "hidden", position: "relative", border: "2px solid rgba(47,211,182,.5)" }}>
             <video ref={camera.videoRef} muted playsInline style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+            <div style={{ position: "absolute", inset: 20, border: "1.5px dashed rgba(255,255,255,.28)", borderRadius: 16, pointerEvents: "none" }} />
           </div>
         </div>
-        <div style={{ padding: "18px 20px 30px", display: "flex", flexDirection: "column", gap: 14 }}>
-          <div className="progressbar-track" style={{ background: "rgba(255,255,255,.15)" }}>
-            <div className="progressbar-fill" style={{ background: "var(--scan-line)", width: `${pct}%` }} />
+
+        {photoCount > 0 && (
+          <div style={{ display: "flex", gap: 8, padding: "0 20px", overflowX: "auto" }}>
+            {capture.photos.map((p) => (
+              <img
+                key={p.id}
+                src={mediaUrl(p.image)}
+                alt=""
+                style={{ width: 46, height: 46, borderRadius: 10, objectFit: "cover", flex: "none", border: "1px solid rgba(255,255,255,.2)" }}
+              />
+            ))}
           </div>
-          <div style={{ font: "400 12.5px var(--font)", color: uploadError ? "var(--rec)" : "rgba(255,255,255,.55)", textAlign: "center" }}>
-            {uploadError
-              ? uploadError
-              : uploading
-                ? "Видео жүктелуде…"
-                : canAdvance
-                  ? "Материал жеткілікті — әрі қарай өтуге болады"
-                  : "Камераны қатар бойымен асықпай жүргізіңіз"}
+        )}
+
+        <div style={{ padding: "16px 20px 30px", display: "flex", flexDirection: "column", gap: 12 }}>
+          <div style={{ font: "400 12.5px var(--font)", color: photoError ? "var(--rec)" : "rgba(255,255,255,.65)", textAlign: "center", minHeight: 32 }}>
+            {photoError || hint}
           </div>
+
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 22 }}>
+            <button
+              className="icon-btn on-dark"
+              onClick={undoLastPhoto}
+              disabled={capturing || finishing || photoCount === 0}
+              style={{ opacity: photoCount === 0 ? 0.35 : 1 }}
+              title="Соңғы фотоны алып тастау"
+            >
+              ↩
+            </button>
+            <button
+              onClick={takePhoto}
+              disabled={capturing || finishing || atMax}
+              style={{
+                width: 74, height: 74, borderRadius: "50%", border: "4px solid rgba(255,255,255,.3)",
+                background: "#fff", opacity: capturing || atMax ? 0.6 : 1,
+              }}
+            >
+              {capturing && <Spinner />}
+            </button>
+            <div style={{ width: 34 }} />
+          </div>
+
           <button
             className="btn"
-            style={{ background: canAdvance ? "var(--scan-line)" : "#fff", color: "#0B2621", opacity: uploading ? 0.7 : 1 }}
-            onClick={advanceAfterRecording}
-            disabled={(!recording && recElapsed === 0) || uploading}
+            style={{ background: canFinish ? "var(--scan-line)" : "rgba(255,255,255,.12)", color: canFinish ? "#0B2621" : "rgba(255,255,255,.4)" }}
+            onClick={finishSector}
+            disabled={!canFinish || finishing || capturing}
           >
-            {uploading ? <Spinner /> : uploadError ? "Қайталап жүктеу" : scannedIds.length + 1 >= sectors.length ? "Шолуды аяқтау" : "Әрі қарай"}
+            {finishing ? <Spinner /> : `Сектор дайын${canFinish ? "" : ` (кемінде ${minPhotos} фото керек)`}`}
           </button>
         </div>
       </div>
@@ -318,8 +339,8 @@ export default function ScanFlow() {
         </div>
       </div>
       <div style={{ padding: "18px 20px 30px", display: "flex", flexDirection: "column", gap: 10 }}>
-        {uploadError && (
-          <div style={{ font: "500 12.5px var(--font)", color: "var(--rec)", textAlign: "center" }}>{uploadError}</div>
+        {photoError && (
+          <div style={{ font: "500 12.5px var(--font)", color: "var(--rec)", textAlign: "center" }}>{photoError}</div>
         )}
         <button className="btn btn-on-dark" onClick={pickNextUnscannedDemo}>Белгіні оқу (демо)</button>
         <button className="btn btn-outline-on-dark" onClick={finishScan}>Дайын — есеп құру</button>

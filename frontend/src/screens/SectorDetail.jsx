@@ -36,6 +36,11 @@ export default function SectorDetail() {
   if (!detail) return <AppShell tabs={<BottomTabBar />}><div className="screen-pad-tight">Жүктелуде…</div></AppShell>;
 
   const style = TAG_STYLE[detail.tag] || TAG_STYLE.unscanned;
+  // 1-based photo positions OpenAI flagged as actually showing the
+  // problem, out of this sector's full photo set (apps/ml/openai_vision.py
+  // affected_photos) — empty when the sector's healthy or only 1 photo
+  // was taken (per-photo attribution isn't meaningful for a single shot).
+  const affectedSet = new Set(detail.ai_narrative?.affected_photos || []);
 
   return (
     <AppShell tabs={<BottomTabBar />}>
@@ -50,13 +55,41 @@ export default function SectorDetail() {
           {detail.meta && <div style={{ font: "500 12.5px var(--font)", color: "var(--ink-soft)" }}>{detail.meta}</div>}
         </div>
 
-        {detail.frame_image && (
-          <div style={{ display: "flex", gap: 9 }}>
-            <img
-              src={mediaUrl(detail.frame_image)}
-              alt=""
-              style={{ flex: 1, height: 104, borderRadius: 14, objectFit: "cover" }}
-            />
+        {detail.photos?.length > 0 && (
+          <div>
+            <div style={{ display: "flex", gap: 8, overflowX: "auto", paddingBottom: 2 }}>
+              {detail.photos.map((p) => {
+                const affected = affectedSet.has(p.position);
+                return (
+                  <div key={p.id} style={{ position: "relative", flex: "none" }}>
+                    <img
+                      src={mediaUrl(p.url)}
+                      alt=""
+                      style={{
+                        width: 84, height: 84, borderRadius: 14, objectFit: "cover",
+                        border: affected ? "2px solid var(--bad-ink)" : "1px solid rgba(20,32,30,.1)",
+                      }}
+                    />
+                    {affected && (
+                      <div
+                        style={{
+                          position: "absolute", top: -6, right: -6, width: 20, height: 20, borderRadius: "50%",
+                          background: "var(--bad-ink)", color: "#fff", display: "flex", alignItems: "center",
+                          justifyContent: "center", font: "700 12px var(--font)",
+                        }}
+                      >
+                        !
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+            {affectedSet.size > 0 && (
+              <div style={{ font: "500 12px var(--font)", color: "var(--bad-ink)", marginTop: 8 }}>
+                Ауру белгісі {affectedSet.size > 1 ? `${affectedSet.size} фотода` : "жоғарыдағы фотода"} байқалды (қызыл жиек).
+              </div>
+            )}
           </div>
         )}
 

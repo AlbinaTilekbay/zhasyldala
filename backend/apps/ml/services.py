@@ -1,7 +1,8 @@
-"""Single entry point both diagnosis flows (anonymous home-plant photo and
-greenhouse sector video frame) call: `diagnose_image`. Keeps the "OpenAI
-vision first, offline model as fallback" decision in one place per the
-plan's `ml` app design.
+"""Single entry point both diagnosis flows call: diagnose_images() (photo
+group — a greenhouse sector's 3-10 captured photos analyzed together) and
+its diagnose_image() single-photo wrapper (the anonymous home-plant flow).
+Keeps the "OpenAI vision first, offline model as fallback" decision in one
+place per the plan's `ml` app design.
 """
 import logging
 
@@ -104,28 +105,33 @@ def _predict_with_model(image_path, crop):
     }
 
 
-def diagnose_image(image_path: str, crop=None) -> dict:
-    """Primary: OpenAI vision (recognizes the plant/condition directly from
-    the photo and produces the cause/treatment/prevention/encouragement
-    cards in the same call — see apps/ml/openai_vision.py). Falls through
-    to the locally trained PlantVillage model (offline, free, but only
-    knows tomato/pepper/strawberry plus whatever's added via the admin
-    training page) when OPENAI_API_KEY isn't set or the call fails — most
-    commonly no internet connection — and only then to the neutral "no
-    answer" placeholder. Always returns a usable dict — never raises, so a
-    Celery task calling this can safely mark its DiagnosisRequest 'done'
-    either way."""
+def diagnose_images(image_paths: list, crop=None) -> dict:
+    """Primary: OpenAI vision, given one OR SEVERAL photos of the same
+    subject at once (a greenhouse sector's 3-10 captured photos, or a
+    single home-plant photo) — it recognizes the plant/condition directly
+    and produces the cause/treatment/prevention/encouragement cards in the
+    same call, synthesizing one combined verdict when given several photos
+    instead of judging each separately (see apps/ml/openai_vision.py).
+    Falls through to the locally trained PlantVillage model (offline,
+    free, but only knows tomato/pepper/strawberry plus whatever's added
+    via the admin training page — and only ever looks at the FIRST photo,
+    since it isn't a multi-image model) when OPENAI_API_KEY isn't set or
+    the call fails — most commonly no internet connection — and only then
+    to the neutral "no answer" placeholder. Always returns a usable dict —
+    never raises, so a Celery task calling this can safely mark its
+    DiagnosisRequest 'done' either way."""
+    image_paths = [p for p in (image_paths or []) if p]
     result = None
     try:
         crop_name = crop.name if crop is not None else None
-        result = openai_vision.diagnose(image_path, crop_name=crop_name)
+        result = openai_vision.diagnose(image_paths, crop_name=crop_name)
     except Exception:  # noqa: BLE001
         logger.exception("OpenAI vision diagnosis failed, falling back")
         result = None
 
-    if result is None and TORCH_AVAILABLE:
+    if result is None and TORCH_AVAILABLE and image_paths:
         try:
-            result = _predict_with_model(image_path, crop)
+            result = _predict_with_model(image_paths[0], crop)
         except Exception:  # noqa: BLE001
             logger.exception("Offline model inference failed, falling back")
             result = None
@@ -137,6 +143,12 @@ def diagnose_image(image_path: str, crop=None) -> dict:
     result.setdefault("ai_narrative", None)
 
     return result
+
+
+def diagnose_image(image_path: str, crop=None) -> dict:
+    """Single-photo convenience wrapper around diagnose_images() — used by
+    the anonymous home-plant flow, which only ever collects one photo."""
+    return diagnose_images([image_path], crop=crop)
 
 
 def random_bootstrap_result(crop=None):

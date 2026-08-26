@@ -217,10 +217,12 @@ longer a reason to pay for or configure either.
 
 - Farmer registration is phone + password, no SMS verification — the
   mockup didn't show an OTP step either; add one before real deployment.
-- Sector-video processing samples a single middle frame per clip
-  (`apps/ml/video.py`) rather than analyzing the full 12 seconds — a
-  reasonable place to invest more later (multi-frame voting, motion
-  blur rejection, etc.).
+- A sector is diagnosed from a farmer-captured set of still photos
+  (3–10, guided prompts for the first 3 — see `apps/scans/views.py`'s
+  `sector_photos`/`finish_sector` and `apps/ml/openai_vision.py`'s
+  multi-photo group analysis), not a video clip — an earlier version
+  sampled one frame out of a 12s video, which produced unreliable
+  material (motion blur, bad framing) for OpenAI vision to work with.
 - `python manage.py bootstrap_plantvillage` seeds and trains a cold-start
   **offline fallback** model from a small PlantVillage sample
   automatically (see "Training the disease model" above), but it only
