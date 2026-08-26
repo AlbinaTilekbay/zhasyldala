@@ -1,8 +1,10 @@
+import re
+
 from django.conf import settings
-from django.conf.urls.static import static
 from django.contrib import admin
 from django.http import FileResponse, HttpResponse
 from django.urls import include, path, re_path
+from django.views.static import serve as serve_static
 from rest_framework_simplejwt.views import TokenRefreshView
 
 urlpatterns = [
@@ -23,14 +25,27 @@ urlpatterns = [
     path("api/admin/", include("apps.ml_training.urls")),
 ]
 
-# Gating this behind DEBUG (as it was) meant uploaded photos and trained
-# model weights had no URL route at all in production (DJANGO_DEBUG=False
-# on Railway) — every /media/... request fell through to the SPA catch-all
-# below and returned index.html instead of the file, so result screens
-# and the admin dataset never showed images. Django serving media itself
+# NOTE: this used to be `urlpatterns += static(settings.MEDIA_URL, ...)`
+# (Django's usual dev-mode helper) — but that helper checks settings.DEBUG
+# *internally* and silently returns an empty list of URL patterns when
+# DEBUG is False, regardless of whether it's wrapped in an `if
+# settings.DEBUG:` block or not. Railway runs with DJANGO_DEBUG=False in
+# production, so that helper was quietly never registering a /media/ route
+# at all — every /media/... request 404'd (it doesn't match the SPA
+# catch-all below either, since that explicitly excludes media/), which is
+# exactly what showed up as a broken image icon on the result screen, no
+# matter how correct MEDIA_URL/MEDIA_ROOT were. Calling django.views.
+# static.serve directly, instead of through the static() helper, serves
+# the same files but isn't gated by DEBUG. Django serving media itself
 # isn't ideal at large scale, but it's the right tradeoff for a project
 # this size rather than standing up a separate file host.
-urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
+urlpatterns += [
+    re_path(
+        r"^%s(?P<path>.*)$" % re.escape(settings.MEDIA_URL.lstrip("/")),
+        serve_static,
+        {"document_root": settings.MEDIA_ROOT},
+    ),
+]
 
 
 def frontend_index(request, *args, **kwargs):
