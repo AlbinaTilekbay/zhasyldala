@@ -52,6 +52,7 @@ python manage.py test                       # тесты
 
 # frontend
 cd frontend && npm install && npm run dev   # :5173, проксирует /api и /media на :8000
+# если :8000 занят: runserver 8010 + DEV_API_TARGET=http://localhost:8010 npm run dev
 ```
 
 Без Redis задачи Celery выполняются inline (`CELERY_TASK_ALWAYS_EAGER` = DEBUG).
@@ -74,9 +75,19 @@ cd frontend && npm install && npm run dev   # :5173, проксирует /api �
 
 - **Язык UI — казахский.** Все пользовательские тексты, ошибки, кнопки —
   на казахском. Общение с Альбиной — на русском.
-- **Дизайн не должен выглядеть как «нейрослоп».** Цвета из `tokens.css`
-  не менять, но избегать шаблонных ИИ-приёмов (одинаковые карточки с
-  тенью, градиенты, эмодзи-иконки, всё по центру). Делать уникально.
+- **Дизайн — «полевой журнал агронома», не «нейрослоп».** Цвета из
+  `tokens.css` не менять. Literata (`--font-display`) — заголовки,
+  JetBrains Mono (`--mono`) — данные (метки секторов, цифры, даты),
+  Onest — текст. Секции через `SectionHead` (`01 ── …`), списки — `.ledger`,
+  карта — `GreenhouseMap`, кнопки — `PrimaryButton` (стрелка справа).
+  Без теней-карточек, градиентов, эмодзи-иконок. Статусы: `STATUS_META`
+  в `ui.jsx` (ok/warn/bad/unknown/unscanned). Даты — `formatKkDate`.
+- Шолу работает офлайн через очередь `frontend/src/offline/uploadQueue.js` —
+  не отправлять фото/finish напрямую через `api.post` в обход очереди.
+- Отчёт строится в `backend/apps/scans/reporting.py` (общий для экрана,
+  истории, публичной ссылки и PDF) — менять логику статусов там.
+- Результат с `source="rule"` (ничего не анализировало фото) — это
+  `unknown`, никогда не показывать его как «қалыпты».
 - **Мобильный UX прежде всего**, особенно iPhone/Safari. Оболочка
   `.app-shell` закреплена `position: fixed` (не `100dvh`) — это фикс
   зависания при открытой клавиатуре iOS; не ломать.

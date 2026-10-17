@@ -3,163 +3,207 @@ import { useNavigate } from "react-router-dom";
 import { api } from "../api/client";
 import AppShell from "../components/AppShell";
 import BottomTabBar from "../components/BottomTabBar";
-import { PrimaryButton } from "../components/ui";
+import DiseaseTimeline from "../components/DiseaseTimeline";
+import QueueBanner from "../components/QueueBanner";
+import {
+  ArrowIcon, CheckBox, GreenhouseMap, PrimaryButton, SectionHead, Spinner, StatusRuler,
+  daysAgoKk, formatKkDate,
+} from "../components/ui";
 import { useAuthStore } from "../store/useAuthStore";
 
-const STATUS_STYLE = {
-  bad: { bg: "var(--bad-tint)", bd: "rgba(180,64,46,.2)", fg: "var(--bad-ink)", label: "Ауру табылды" },
-  warn: { bg: "var(--warn-tint)", bd: "rgba(176,122,18,.2)", fg: "var(--warn-ink)", label: "Қауіп бар" },
-  ok: { bg: "var(--accent-tint)", bd: "rgba(15,118,110,.18)", fg: "var(--accent)", label: "Жылыжай қалыпты" },
-  none: { bg: "var(--accent-tint)", bd: "rgba(15,118,110,.18)", fg: "var(--accent)", label: "Алғашқы шолу қажет" },
-};
+// Headline + accent per overall state. Written as a sentence a farmer
+// would say, not a status code.
+function headline(counts, hasReport) {
+  if (!hasReport) return { text: "Алғашқы шолуды бастаңыз", tone: "var(--ink)" };
+  if (counts.bad) return { text: `${counts.bad} секторда ауру табылды`, tone: "var(--bad-ink)" };
+  if (counts.warn) return { text: `${counts.warn} секторда қауіп бар`, tone: "var(--warn-ink)" };
+  // Don't call the whole greenhouse healthy off a partial walk-through.
+  if (!counts.ok && counts.unknown) return { text: "Фотолар талданбады", tone: "var(--ink-mute)" };
+  if (counts.unscanned || counts.unknown) return { text: "Тексерілгені сау", tone: "var(--accent)" };
+  return { text: "Жылыжай сау", tone: "var(--accent)" };
+}
 
 export default function Dashboard() {
   const navigate = useNavigate();
-  const userInitials = useAuthStore((s) => s.user?.initials || "АС");
+  const userInitials = useAuthStore((s) => s.user?.initials || "—");
+  const [loaded, setLoaded] = useState(false);
   const [greenhouse, setGreenhouse] = useState(null);
   const [sessions, setSessions] = useState([]);
   const [report, setReport] = useState(null);
   const [plan, setPlan] = useState(null);
+  const [planBusy, setPlanBusy] = useState(false);
 
   useEffect(() => {
     (async () => {
-      const greenhouses = await api.get("/api/greenhouses/");
-      const gh = (greenhouses.results || greenhouses)[0];
-      setGreenhouse(gh);
-      if (!gh) return;
+      try {
+        const greenhouses = await api.get("/api/greenhouses/");
+        const gh = (greenhouses.results || greenhouses)[0];
+        setGreenhouse(gh || null);
+        if (!gh) return;
 
-      const allSessions = await api.get("/api/scan-sessions/");
-      const mine = (allSessions.results || allSessions)
-        .filter((s) => s.greenhouse === gh.id)
-        .sort((a, b) => new Date(b.started_at) - new Date(a.started_at));
-      setSessions(mine);
+        const allSessions = await api.get("/api/scan-sessions/");
+        const mine = (allSessions.results || allSessions)
+          .filter((s) => s.greenhouse === gh.id && s.status === "done")
+          .sort((a, b) => new Date(b.started_at) - new Date(a.started_at));
+        setSessions(mine);
 
-      const latestDone = mine.find((s) => s.status === "done");
-      if (latestDone) {
-        const rep = await api.get(`/api/scan-sessions/${latestDone.id}/report/`);
-        setReport(rep);
-        const plans = await api.get("/api/plans/");
-        const matching = (plans.results || plans).find((p) => p.scan_session === latestDone.id);
-        setPlan(matching || null);
+        const latest = mine[0];
+        if (latest) {
+          const [rep, plans] = await Promise.all([
+            api.get(`/api/scan-sessions/${latest.id}/report/`),
+            api.get("/api/plans/"),
+          ]);
+          setReport(rep);
+          setPlan((plans.results || plans).find((p) => p.scan_session === latest.id) || null);
+        }
+      } finally {
+        setLoaded(true);
       }
     })();
   }, []);
 
-  if (!greenhouse) {
+  async function createPlan() {
+    setPlanBusy(true);
+    try {
+      await api.post("/api/plans/generate/", { scan_session: sessions[0].id });
+      navigate(`/app/plan/${sessions[0].id}`);
+    } finally {
+      setPlanBusy(false);
+    }
+  }
+
+  if (!loaded) {
     return (
       <AppShell tabs={<BottomTabBar />}>
-        <div className="screen-pad-tight" style={{ paddingTop: 40 }}>Жүктелуде…</div>
+        <div style={{ minHeight: "70dvh", display: "flex", alignItems: "center", justifyContent: "center" }}><Spinner /></div>
       </AppShell>
     );
   }
 
-  const counts = report?.counts || { ok: 0, warn: 0, bad: 0 };
-  const statusKey = !report ? "none" : counts.bad ? "bad" : counts.warn ? "warn" : "ok";
-  const status = STATUS_STYLE[statusKey];
+  if (!greenhouse) {
+    return (
+      <AppShell tabs={<BottomTabBar />}>
+        <div className="screen-pad-tight" style={{ paddingTop: 40 }}>
+          <h1 className="title-lg" style={{ margin: 0 }}>Жылыжай әлі қосылмаған</h1>
+          <p className="subtle">Секторлар мен QR белгілерді баптап алыңыз — бар болғаны 2 минут.</p>
+          <PrimaryButton onClick={() => navigate("/register")}>Жылыжайды баптау</PrimaryButton>
+        </div>
+      </AppShell>
+    );
+  }
+
+  const latest = sessions[0];
+  const counts = report?.counts || { ok: 0, warn: 0, bad: 0, unscanned: greenhouse.sectors.length };
+  const hasFindings = counts.bad > 0 || counts.warn > 0;
+  const head = headline(counts, Boolean(report));
+  const mapRows = report
+    ? report.rows.map((row) => row.map((c) => ({ key: c.sector_id, label: c.label, tag: c.tag })))
+    : groupSectors(greenhouse.sectors).map((row) => row.map((s) => ({ key: s.id, label: s.label, tag: "unscanned" })));
 
   return (
     <AppShell tabs={<BottomTabBar />}>
       <div className="screen-pad-tight">
-        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between" }}>
-          <div>
-            <div className="subtle">{greenhouse.name}</div>
-            <div className="title-lg" style={{ marginTop: 2 }}>
-              {greenhouse.crop?.name || "Дақыл таңдалмаған"} · {greenhouse.sectors.length} сектор
-            </div>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+          <div className="eyebrow" style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {greenhouse.name} · {greenhouse.crop?.name || "дақыл таңдалмаған"}
           </div>
-          <div className="avatar-circle" style={{ width: 38, height: 38 }}>
+          <button className="avatar-circle" style={{ width: 36, height: 36, border: 0 }} onClick={() => navigate("/app/profile")}>
             {userInitials}
-          </div>
+          </button>
         </div>
 
-        <div className="card card-lg" style={{ background: status.bg, borderColor: status.bd, display: "flex", flexDirection: "column", gap: 12 }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-            <div style={{ font: "700 15px var(--font)", color: status.fg }}>{status.label}</div>
-            <div style={{ font: "500 12px var(--font)", color: "var(--ink-mute)" }}>
-              {report ? "Соңғы шолу нәтижесі" : "Шолу әлі болмады"}
-            </div>
-          </div>
-          <div style={{ display: "flex", gap: 18 }}>
-            <StatCount value={counts.ok} label="қалыпты" color="var(--accent)" />
-            <StatCount value={counts.warn} label="қауіп бар" color="var(--warn)" />
-            <StatCount value={counts.bad} label="ауру" color="var(--bad)" />
-          </div>
-          <PrimaryButton onClick={() => navigate("/app/scan")}>Жылыжайды шолуды бастау</PrimaryButton>
+        <QueueBanner />
+
+        <div className="rise">
+          <h1 className="title-lg" style={{ margin: 0, color: head.tone }}>{head.text}</h1>
+          <p className="subtle" style={{ marginTop: 6 }}>
+            {latest
+              ? `Соңғы шолу — ${formatKkDate(latest.started_at)} (${daysAgoKk(latest.started_at)}), ${report?.scanned_count ?? latest.captures.length}/${greenhouse.sectors.length} сектор түсірілді.`
+              : `${greenhouse.sectors.length} сектор дайын. QR белгілерді іліп, телефонмен аралап шығыңыз.`}
+          </p>
         </div>
 
-        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between" }}>
-            <div style={{ font: "700 14px var(--font)" }}>Емдеу жоспары</div>
-            {plan && (
-              <div style={{ font: "500 12px var(--font)", color: "var(--ink-mute)" }}>
-                {plan.total_count} істің {plan.done_count}-і
-              </div>
-            )}
-          </div>
-          {plan ? (
-            <div className="card card-lg" style={{ padding: "6px 14px" }}>
-              {plan.items.slice(0, 3).map((item) => (
-                <div key={item.id} style={{ display: "flex", gap: 12, alignItems: "center", padding: "11px 0", borderBottom: "1px solid rgba(20,32,30,.06)" }}>
-                  <div
-                    style={{
-                      width: 22, height: 22, flex: "none", borderRadius: 7, border: `1.5px solid ${item.done ? "var(--accent)" : "rgba(20,32,30,.22)"}`,
-                      background: item.done ? "var(--accent)" : "transparent", color: "#fff", font: "700 12px var(--font)",
-                      display: "flex", alignItems: "center", justifyContent: "center",
-                    }}
-                  >
-                    {item.done ? "✓" : ""}
+        {report && <div className="rise" style={{ animationDelay: ".08s" }}><StatusRuler counts={counts} /></div>}
+
+        <button
+          onClick={() => report && navigate(`/app/report/${latest.id}`)}
+          style={{ background: "none", border: 0, padding: 0, textAlign: "left", cursor: report ? "pointer" : "default" }}
+          aria-label="Жылыжай картасы"
+        >
+          <GreenhouseMap rows={mapRows} compact />
+        </button>
+
+        <PrimaryButton onClick={() => navigate("/app/scan")}>
+          {latest ? "Жаңа шолу бастау" : "Алғашқы шолуды бастау"}
+        </PrimaryButton>
+
+        <SectionHead no={1} title="Емдеу жоспары" aside={plan ? `${plan.done_count}/${plan.total_count}` : null} />
+        {plan ? (
+          <div className="ledger">
+            {plan.items.slice(0, 3).map((item) => (
+              <div key={item.id} className="ledger-row">
+                <CheckBox on={item.done} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ font: "600 14px var(--font)", textDecoration: item.done ? "line-through" : "none", color: item.done ? "var(--ink-faint)" : "var(--ink)" }}>
+                    {item.title}
                   </div>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ font: "600 13.5px var(--font)", textDecoration: item.done ? "line-through" : "none" }}>{item.title}</div>
-                    <div style={{ font: "400 11.5px var(--font)", color: "var(--ink-faint)", marginTop: 2 }}>
-                      {item.when_label} · {item.where_label}
-                    </div>
+                  <div className="mono" style={{ fontSize: 11, color: "var(--ink-faint)", marginTop: 3 }}>
+                    {item.when_label} · {item.where_label}
                   </div>
                 </div>
-              ))}
-              <button
-                onClick={() => navigate(`/app/plan/${plan.scan_session}`)}
-                style={{ width: "100%", padding: "12px 0", border: 0, background: "transparent", font: "600 13px var(--font)", color: "var(--accent)", textAlign: "left" }}
-              >
-                Толық жоспар →
-              </button>
-            </div>
-          ) : (
-            <div className="card card-lg" style={{ border: "1px dashed rgba(20,32,30,.18)", color: "var(--ink-faint)", font: "400 13px/1.5 var(--font)" }}>
-              Жоспар алғашқы шолудан кейін, ауру табылса пайда болады.
-            </div>
-          )}
-        </div>
-
-        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          <div style={{ font: "700 14px var(--font)" }}>Бұрынғы шолулар</div>
-          {sessions.filter((s) => s.status === "done").map((s) => (
-            <button
-              key={s.id}
-              className="card"
-              style={{ textAlign: "left", display: "flex", alignItems: "center", gap: 12, cursor: "pointer" }}
-              onClick={() => navigate(`/app/report/${s.id}`)}
-            >
-              <div style={{ width: 8, height: 8, borderRadius: "50%", background: "var(--accent)" }} />
-              <div style={{ flex: 1 }}>
-                <div style={{ font: "600 13.5px var(--font)" }}>{new Date(s.started_at).toLocaleDateString("kk-KZ")}</div>
-                <div style={{ font: "400 11.5px var(--font)", color: "var(--ink-faint)", marginTop: 2 }}>
-                  {s.captures.length} сектор түсірілді
-                </div>
               </div>
+            ))}
+            <button className="ledger-row" onClick={() => navigate(`/app/plan/${plan.scan_session}`)} style={{ color: "var(--accent)", font: "600 13.5px var(--font)", cursor: "pointer" }}>
+              <span style={{ flex: 1 }}>Толық жоспар</span>
+              <ArrowIcon className="ledger-go" />
             </button>
-          ))}
-        </div>
+          </div>
+        ) : hasFindings ? (
+          <div className="empty-slot">
+            <span>Соңғы шолуда {counts.bad + counts.warn} проблемалы сектор бар. Апталық емдеу жоспарын құрайық — не, қашан, қай секторда.</span>
+            <PrimaryButton onClick={createPlan} disabled={planBusy}>{planBusy ? "Құрылуда…" : "Жоспар құру"}</PrimaryButton>
+          </div>
+        ) : (
+          <div className="empty-slot">
+            {report ? "Ауру табылмады — жоспар қажет емес. Күтімді жалғастырыңыз." : "Жоспар алғашқы шолудан кейін, ауру табылса пайда болады."}
+          </div>
+        )}
+
+        {sessions.length >= 2 && (
+          <>
+            <SectionHead no={2} title="Аурудың таралуы" aside={`${Math.min(sessions.length, 12)} апта`} />
+            <DiseaseTimeline greenhouseId={greenhouse.id} />
+          </>
+        )}
+
+        <SectionHead no={sessions.length >= 2 ? 3 : 2} title="Шолулар тарихы" aside={sessions.length || null} />
+        {sessions.length ? (
+          <div className="ledger">
+            {sessions.map((s) => (
+              <button key={s.id} className="ledger-row" style={{ cursor: "pointer" }} onClick={() => navigate(`/app/report/${s.id}`)}>
+                <span className="mono" style={{ width: 74, fontSize: 12.5, fontWeight: 600 }}>{formatKkDate(s.started_at)}</span>
+                <span style={{ flex: 1, font: "400 13px var(--font)", color: "var(--ink-mute)" }}>{s.captures.length} сектор түсірілді</span>
+                <ArrowIcon className="ledger-go" />
+              </button>
+            ))}
+          </div>
+        ) : (
+          <div className="empty-slot">Әзірге шолу болмады. Бірінші шолудан кейін мұнда әр аптаның нәтижесі сақталады.</div>
+        )}
       </div>
     </AppShell>
   );
 }
 
-function StatCount({ value, label, color }) {
-  return (
-    <div>
-      <div style={{ font: "800 22px var(--font)", color }}>{value}</div>
-      <div style={{ font: "500 11px var(--font)", color: "var(--ink-mute)" }}>{label}</div>
-    </div>
-  );
+function groupSectors(sectors) {
+  const rows = [];
+  let current = null;
+  for (const s of sectors) {
+    if (s.row !== current) {
+      rows.push([]);
+      current = s.row;
+    }
+    rows[rows.length - 1].push(s);
+  }
+  return rows;
 }

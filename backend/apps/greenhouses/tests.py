@@ -48,3 +48,26 @@ class SectorGenerationTests(TestCase):
         # letter set capped a greenhouse at 5.
         sectors = self.greenhouse.generate_sectors(row_counts=[1] * 6)
         self.assertEqual([s.label for s in sectors], ["A1", "B1", "C1", "D1", "E1", "F1"])
+
+
+class QrSheetTests(TestCase):
+    def setUp(self):
+        from rest_framework.test import APIClient
+
+        self.owner = User.objects.create_user(phone="+77011234568", password="x", full_name="B")
+        self.greenhouse = Greenhouse.objects.create(owner=self.owner, name="Жылыжай", rows=6, cols=1)
+        self.greenhouse.row_counts = [1] * 6
+        self.greenhouse.save()
+        self.greenhouse.generate_sectors(row_counts=[1] * 6)
+        self.client = APIClient()
+        self.client.force_authenticate(self.owner)
+
+    def test_row_labels_pdf_has_one_page_per_row(self):
+        res = self.client.get(f"/api/greenhouses/{self.greenhouse.id}/rows/qr-sheet.pdf/")
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res["Content-Type"], "application/pdf")
+        self.assertEqual(res.content.count(b"/Type /Page\n") + res.content.count(b"/Type /Page "), 6)
+
+    def test_sector_sheet_pdf_renders(self):
+        res = self.client.get(f"/api/greenhouses/{self.greenhouse.id}/sectors/qr-sheet.pdf/")
+        self.assertEqual(res.status_code, 200)

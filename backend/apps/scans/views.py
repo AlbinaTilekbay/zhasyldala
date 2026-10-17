@@ -1,3 +1,4 @@
+from django.http import HttpResponse
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from rest_framework import permissions, status, viewsets
@@ -7,6 +8,7 @@ from rest_framework.response import Response
 from apps.greenhouses.models import Greenhouse, Sector
 
 from .models import SECTOR_PHOTOS_MAX, SECTOR_PHOTOS_MIN, ScanSession, SectorCapture, SectorPhoto
+from .reporting import capture_diagnosis, diagnosis_name, diagnosis_tag, greenhouse_history, previous_capture, report_pdf, session_report
 from .serializers import ScanSessionSerializer, SectorCaptureSerializer
 
 
@@ -34,6 +36,12 @@ class ScanSessionViewSet(viewsets.ModelViewSet):
         sector = get_object_or_404(Sector, pk=sector_id, greenhouse=session.greenhouse)
         capture, _ = SectorCapture.objects.get_or_create(session=session, sector=sector)
 
+        # Offline queue retry of a photo the server already has: answer as
+        # if it were just added, without storing it twice.
+        client_id = (request.data.get("client_id") or "")[:64]
+        if client_id and capture.photos.filter(client_id=client_id).exists():
+            return Response(SectorCaptureSerializer(capture).data, status=status.HTTP_200_OK)
+
         if capture.status != SectorCapture.Status.IN_PROGRESS:
             return Response(
                 {"detail": "Бұл сектор түсіру аяқталды — жаңа фото қосу мүмкін емес."},
@@ -48,7 +56,7 @@ class ScanSessionViewSet(viewsets.ModelViewSet):
         if not image:
             return Response({"detail": "Фото жіберілмеді."}, status=status.HTTP_400_BAD_REQUEST)
 
-        SectorPhoto.objects.create(capture=capture, image=image, order=capture.photo_count)
+        SectorPhoto.objects.create(capture=capture, image=image, order=capture.photo_count, client_id=client_id)
         capture.refresh_from_db()
         return Response(SectorCaptureSerializer(capture).data, status=status.HTTP_201_CREATED)
 
@@ -80,6 +88,11 @@ class ScanSessionViewSet(viewsets.ModelViewSet):
         sector = get_object_or_404(Sector, pk=sector_id, greenhouse=session.greenhouse)
         capture = get_object_or_404(SectorCapture, session=session, sector=sector)
 
+        # Already finished (e.g. the offline queue resending) — don't run
+        # and bill the diagnosis a second time.
+        if capture.status != SectorCapture.Status.IN_PROGRESS:
+            return Response(SectorCaptureSerializer(capture).data)
+
         if capture.photo_count < SECTOR_PHOTOS_MIN:
             return Response(
                 {"detail": f"Кемінде {SECTOR_PHOTOS_MIN} фото түсіру керек (қазір {capture.photo_count})."},
@@ -110,45 +123,28 @@ class ScanSessionViewSet(viewsets.ModelViewSet):
         """Sector-grid report: every sector in the greenhouse, colored by
         its latest diagnosis for this session (or grey if unscanned) —
         mirrors the mockup's `cellStyle()` logic."""
-        session = self.get_object()
-        captures_by_sector = {c.sector_id: c for c in session.captures.select_related("sector")}
-        rows = []
-        counts = {"ok": 0, "warn": 0, "bad": 0, "unscanned": 0}
-        greenhouse = session.greenhouse
-        current_row, row_cells = None, []
-        for sector in greenhouse.sectors.order_by("row", "col"):
-            capture = captures_by_sector.get(sector.id)
-            diagnosis = None
-            if capture:
-                request_obj = getattr(capture, "diagnosis_request", None)
-                diagnosis = getattr(request_obj, "result", None) if request_obj else None
-            severity = diagnosis.severity if diagnosis else None
-            tag = severity or "unscanned"
-            counts[tag] = counts.get(tag, 0) + 1
+        return Response(session_report(self.get_object()))
 
-            narrative_name = (diagnosis.ai_narrative or {}).get("condition_name") if diagnosis else None
-            cell = {
-                "sector_id": sector.id, "label": sector.label, "plants": sector.plant_count,
-                "tag": tag,
-                "diagnosis_disease": (diagnosis.disease.name if diagnosis and diagnosis.disease else narrative_name),
-                "confidence": diagnosis.confidence if diagnosis else None,
-            }
-            if sector.row != current_row:
-                if row_cells:
-                    rows.append(row_cells)
-                row_cells, current_row = [], sector.row
-            row_cells.append(cell)
-        if row_cells:
-            rows.append(row_cells)
-
+    @action(detail=False, methods=["get"])
+    def history(self, request):
+        """?greenhouse=<id> — finished walkthroughs oldest-first with each
+        sector's tag, for the "how the disease spread" timeline."""
+        greenhouse = get_object_or_404(Greenhouse, pk=request.query_params.get("greenhouse"), owner=request.user)
         return Response({
-            "session_id": session.id,
-            "status": session.status,
-            "total_sectors": greenhouse.sectors.count(),
-            "scanned_count": session.scanned_count,
-            "counts": counts,
-            "rows": rows,
+            "sectors": [{"id": s.id, "label": s.label, "row": s.row, "col": s.col} for s in greenhouse.sectors.order_by("row", "col")],
+            "sessions": greenhouse_history(greenhouse),
         })
+
+    @action(detail=True, methods=["post"])
+    def share(self, request, pk=None):
+        """Returns (creating once) a read-only public link token for this
+        report — for sending to an agronomist."""
+        session = self.get_object()
+        return Response({"token": str(session.ensure_share_token())})
+
+    @action(detail=True, methods=["get"], url_path="pdf")
+    def report_pdf(self, request, pk=None):
+        return pdf_response(self.get_object())
 
     @action(detail=True, methods=["get"], url_path="sectors/(?P<sector_id>[^/.]+)")
     def sector_detail(self, request, pk=None, sector_id=None):
@@ -172,8 +168,22 @@ class ScanSessionViewSet(viewsets.ModelViewSet):
             if capture else []
         )
 
+        prev = previous_capture(session, sector)
+        prev_diag = capture_diagnosis(prev)
+        previous = (
+            {
+                "session_id": prev.session_id,
+                "started_at": prev.session.started_at,
+                "tag": diagnosis_tag(prev_diag) or "unknown",
+                "diagnosis_name": diagnosis_name(prev_diag),
+                "photos": [{"id": p.id, "url": p.image.url, "position": p.order + 1} for p in prev.photos.all()],
+            }
+            if prev else None
+        )
+
         if diagnosis is None:
             return Response({
+                "previous": previous,
                 "sector": {"id": sector.id, "label": sector.label, "plants": sector.plant_count},
                 "scanned": capture is not None,
                 "tag": "unscanned" if capture is None else "ok",
@@ -187,9 +197,29 @@ class ScanSessionViewSet(viewsets.ModelViewSet):
                 "photos": photos,
             })
 
+        if diagnosis.source == "rule":
+            return Response({
+                "previous": previous,
+                "sector": {"id": sector.id, "label": sector.label, "plants": sector.plant_count},
+                "scanned": True,
+                "tag": "unknown",
+                "status_text": "Анықталмады",
+                "diagnosis_name": "Фотолар талданбады",
+                "meta": None,
+                "symptoms": [],
+                "recommendations": [
+                    "Талдау қызметіне қосылу мүмкін болмады — көбіне интернет әлсіз болғанда болады.",
+                    "Келесі шолуда осы секторды қайта түсіріңіз.",
+                ],
+                "ai_narrative": None,
+                "frame_image": cover.url if cover else None,
+                "photos": photos,
+            })
+
         tag_text = {"ok": "Қалыпты", "warn": "Қауіп бар", "bad": "Ауру"}[diagnosis.severity]
         narrative_name = (diagnosis.ai_narrative or {}).get("condition_name")
         return Response({
+            "previous": previous,
             "sector": {"id": sector.id, "label": sector.label, "plants": sector.plant_count},
             "scanned": True,
             "tag": diagnosis.severity,
@@ -202,3 +232,26 @@ class ScanSessionViewSet(viewsets.ModelViewSet):
             "frame_image": cover.url if cover else None,
             "photos": photos,
         })
+
+
+def pdf_response(session):
+    response = HttpResponse(report_pdf(session), content_type="application/pdf")
+    response["Content-Disposition"] = f'attachment; filename="zhasyldala-esep-{session.started_at:%Y-%m-%d}.pdf"'
+    return response
+
+
+class SharedReportViewSet(viewsets.ViewSet):
+    """Public, read-only view of one shared report (no account needed) —
+    GET /api/shared/<token>/ and /api/shared/<token>/pdf."""
+
+    permission_classes = [permissions.AllowAny]
+    authentication_classes = []
+
+    def retrieve(self, request, pk=None):
+        session = get_object_or_404(ScanSession, share_token=pk, status=ScanSession.Status.DONE)
+        return Response(session_report(session))
+
+    @action(detail=True, methods=["get"], url_path="pdf")
+    def report_pdf(self, request, pk=None):
+        session = get_object_or_404(ScanSession, share_token=pk, status=ScanSession.Status.DONE)
+        return pdf_response(session)

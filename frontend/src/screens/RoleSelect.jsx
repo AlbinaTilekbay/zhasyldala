@@ -1,54 +1,54 @@
 import { useNavigate } from "react-router-dom";
 import AppShell from "../components/AppShell";
+import { GreenhouseSmall, PottedPlant } from "../components/Illustrations";
+import { TopBar } from "../components/TopBar";
+import { ArrowIcon } from "../components/ui";
+
+const ROLES = [
+  {
+    to: "/home", Art: PottedPlant, eyebrow: "01 · тіркеусіз", title: "Үй өсімдігі",
+    body: "Бір фото — диагноз және күтім кеңесі. Бірден камера ашылады.",
+  },
+  {
+    to: "/register", Art: GreenhouseSmall, eyebrow: "02 · фермер", title: "Жылыжай",
+    body: "Секторлар, QR белгілер, тұрақты шолу, есеп және апталық емдеу жоспары.",
+  },
+];
 
 export default function RoleSelect() {
   const navigate = useNavigate();
   return (
     <AppShell>
       <div className="screen-pad">
+        <TopBar to="/welcome" />
         <div>
-          <div className="title-lg">Сіз кімсіз?</div>
-          <p className="subtle" style={{ marginTop: 8 }}>Мұны кейін профильде өзгертуге болады.</p>
+          <h1 className="title-lg" style={{ margin: 0 }}>Нені тексереміз?</h1>
+          <p className="subtle" style={{ marginTop: 8 }}>Кейін басқа режимге кез келген уақытта ауыса аласыз.</p>
         </div>
 
-        <button
-          className="card card-lg"
-          style={{ textAlign: "left", display: "flex", flexDirection: "column", gap: 8, cursor: "pointer" }}
-          onClick={() => navigate("/home")}
-        >
-          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-            <div
-              style={{
-                width: 38, height: 38, borderRadius: 12, background: "var(--accent-tint)", display: "flex",
-                alignItems: "center", justifyContent: "center", font: "700 15px var(--font)", color: "var(--accent)",
-              }}
-            >
-              Ү
+        {ROLES.map(({ to, Art, eyebrow, title, body }, i) => (
+          <button
+            key={to}
+            className="card rise"
+            onClick={() => navigate(to)}
+            style={{
+              textAlign: "left", display: "grid", gridTemplateColumns: "1fr auto", gap: "6px 14px", padding: "18px 18px 16px",
+              cursor: "pointer", color: "var(--ink)", animationDelay: `${0.08 + i * 0.08}s`,
+            }}
+          >
+            <div className="eyebrow" style={{ color: "var(--accent)" }}>{eyebrow}</div>
+            <div style={{ gridRow: "span 3", color: i ? "var(--ink)" : "var(--accent)", alignSelf: "center" }}>
+              <Art size={68} />
             </div>
-            <div style={{ font: "700 17px var(--font)" }}>Үй өсімдігі</div>
-          </div>
-          <div className="subtle">Бір сурет — диагноз және күтім кеңесі. Тіркелудің қажеті жоқ.</div>
-          <div style={{ font: "600 12px var(--font)", color: "var(--accent)" }}>Бірден камераға →</div>
-        </button>
-
-        <button
-          className="card card-lg"
-          style={{ textAlign: "left", display: "flex", flexDirection: "column", gap: 8, cursor: "pointer" }}
-          onClick={() => navigate("/register")}
-        >
-          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-            <div
-              style={{
-                width: 38, height: 38, borderRadius: 12, background: "var(--ink)", display: "flex",
-                alignItems: "center", justifyContent: "center", font: "700 15px var(--font)", color: "#fff",
-              }}
-            >
-              Ж
+            <div className="title-serif" style={{ fontSize: 22 }}>{title}</div>
+            <div style={{ font: "400 13px/1.5 var(--font)", color: "var(--ink-mute)", maxWidth: 220 }}>{body}</div>
+            <div style={{ gridColumn: "1 / -1", display: "flex", justifyContent: "flex-end", color: "var(--accent)", borderTop: "1px solid var(--ink-hairline)", paddingTop: 10, marginTop: 6 }}>
+              <ArrowIcon className="" />
             </div>
-            <div style={{ font: "700 17px var(--font)" }}>Жылыжай / фермер</div>
-          </div>
-          <div className="subtle">Секторлар, QR белгілер, тұрақты шолу, есептер мен емдеу жоспары.</div>
-          <div style={{ font: "600 12px var(--font)", color: "var(--accent)" }}>Тіркелу қажет →</div>
+          </button>
+        ))}
+        <button className="btn-link" style={{ alignSelf: "center", marginTop: 4 }} onClick={() => navigate("/login")}>
+          Тіркелгенім бар — кіру
         </button>
       </div>
     </AppShell>

@@ -7,6 +7,10 @@ from django.urls import include, path, re_path
 from django.views.static import serve as serve_static
 from rest_framework_simplejwt.views import TokenRefreshView
 
+admin.site.site_header = "ZhasylDala — басқару"
+admin.site.site_title = "ZhasylDala"
+admin.site.index_title = "Деректер"
+
 urlpatterns = [
     # Django's own built-in admin lives at /django-admin/, not /admin/ —
     # the React SPA's own admin/training dashboard (AdminLayout.jsx) is a

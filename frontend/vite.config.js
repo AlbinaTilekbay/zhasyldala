@@ -5,6 +5,9 @@ import { VitePWA } from "vite-plugin-pwa";
 // Dev server proxies /api and /media to the Django backend so the SPA can
 // call same-origin paths in both dev and prod (nginx does the same proxy
 // in the docker-compose setup — see ../docker-compose.yml).
+// Override with DEV_API_TARGET when :8000 is taken by something else.
+const apiTarget = process.env.DEV_API_TARGET || "http://localhost:8000";
+
 export default defineConfig({
   plugins: [
     react(),
@@ -32,8 +35,8 @@ export default defineConfig({
     // the same Wi-Fi can open http://<mac-lan-ip>:5173 directly.
     host: true,
     proxy: {
-      "/api": { target: "http://localhost:8000", changeOrigin: true },
-      "/media": { target: "http://localhost:8000", changeOrigin: true },
+      "/api": { target: apiTarget, changeOrigin: true },
+      "/media": { target: apiTarget, changeOrigin: true },
     },
   },
 });

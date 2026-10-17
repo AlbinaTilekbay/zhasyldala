@@ -5,6 +5,7 @@ import Login from "./screens/Login";
 import PlanScreen from "./screens/PlanScreen";
 import Profile from "./screens/Profile";
 import Report from "./screens/Report";
+import SharedReport from "./screens/SharedReport";
 import RoleSelect from "./screens/RoleSelect";
 import SectorDetail from "./screens/SectorDetail";
 import Tips from "./screens/Tips";
@@ -29,6 +30,7 @@ export default function App() {
       <Route path="/login" element={<Login />} />
       <Route path="/home" element={<HomePlantFlow />} />
       <Route path="/register" element={<Register />} />
+      <Route path="/s/:token" element={<SharedReport />} />
 
       {/* Farmer setup wizard + main app — all require a logged-in farmer */}
       <Route element={<RequireAuth />}>

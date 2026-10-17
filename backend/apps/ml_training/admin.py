@@ -1,12 +1,19 @@
 from django.contrib import admin
 
+from apps.core.admin_utils import thumb
+
 from .models import ModelVersion, TrainingImage, TrainingJob
 
 
 @admin.register(TrainingImage)
 class TrainingImageAdmin(admin.ModelAdmin):
-    list_display = ["id", "crop", "disease", "verified", "source", "uploaded_by", "created_at"]
+    list_display = ["id", "preview", "crop", "disease", "verified", "source", "uploaded_by", "created_at"]
+    list_editable = ["verified"]
     list_filter = ["verified", "source", "crop"]
+
+    @admin.display(description="Фото")
+    def preview(self, obj):
+        return thumb(obj.image, 48)
     actions = ["mark_verified"]
 
     @admin.action(description="Расталған деп белгілеу (mark verified)")

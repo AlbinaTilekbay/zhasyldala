@@ -11,6 +11,7 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 
 from .models import GRID_PRESETS, Crop, Greenhouse, Sector
+from .pdf import fonts, row_labels_pdf
 from .serializers import (
     ApplyPresetSerializer,
     CropSerializer,
@@ -84,9 +85,10 @@ class GreenhouseViewSet(viewsets.ModelViewSet):
         cell = 45 * mm
         cols_per_row = int((width - 2 * margin) // cell)
 
-        c.setFont("Helvetica-Bold", 14)
+        regular, bold = fonts()
+        c.setFont(bold, 14)
         c.drawString(margin, height - margin, greenhouse.name)
-        c.setFont("Helvetica", 9)
+        c.setFont(regular, 9)
         c.drawString(margin, height - margin - 14, "ZhasylDala — сектор QR белгілері")
 
         x0 = margin
@@ -115,13 +117,23 @@ class GreenhouseViewSet(viewsets.ModelViewSet):
             from reportlab.lib.utils import ImageReader
 
             c.drawImage(ImageReader(qr_buf), x, y - 32 * mm, width=32 * mm, height=32 * mm)
-            c.setFont("Helvetica-Bold", 11)
+            c.setFont(bold, 11)
             c.drawCentredString(x + 16 * mm, y - 36 * mm, sector.label)
 
         c.save()
         buf.seek(0)
         response = HttpResponse(buf.read(), content_type="application/pdf")
         response["Content-Disposition"] = f'attachment; filename="{greenhouse.name}-qr.pdf"'
+        return response
+
+    @action(detail=True, methods=["get"], url_path="rows/qr-sheet.pdf")
+    def row_labels_pdf(self, request, pk=None):
+        """Printable row labels (one A4 page per row) — hung at the start
+        of each greenhouse row; see apps/greenhouses/pdf.py."""
+        greenhouse = self.get_object()
+        row_count = len(greenhouse.row_counts) or greenhouse.rows
+        response = HttpResponse(row_labels_pdf(row_count, greenhouse.name), content_type="application/pdf")
+        response["Content-Disposition"] = 'attachment; filename="zhasyldala-qatarlar.pdf"'
         return response
 
 

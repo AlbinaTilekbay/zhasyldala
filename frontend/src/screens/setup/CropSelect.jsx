@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { api } from "../../api/client";
 import AppShell from "../../components/AppShell";
 import { TopBar } from "../../components/TopBar";
-import { Chip, PrimaryButton } from "../../components/ui";
+import { PrimaryButton, StepBar } from "../../components/ui";
 import { useSetupStore } from "../../store/useSetupStore";
 
 export default function CropSelect() {
@@ -45,21 +45,36 @@ export default function CropSelect() {
   return (
     <AppShell>
       <div className="screen-pad">
-        <TopBar to="/register" subtitle="2-қадам / 3" title="" />
+        <TopBar to="/register" />
+        <StepBar step={2} />
         <div>
-          <div className="title-lg">Не өсіресіз?</div>
+          <h1 className="title-lg" style={{ margin: 0 }}>Не өсіресіз?</h1>
           <p className="subtle" style={{ marginTop: 8 }}>
-            Дақылға қарай модель іздейтін аурулар мен «Кеңестер» бөліміндегі мазмұн таңдалады.
+            Дақылға қарай жүйе іздейтін аурулар мен «Кеңестер» бөлімі бапталады.
           </p>
         </div>
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
-          {crops.map((c) => (
-            <Chip key={c.id} active={c.id === cropId} onClick={() => setCropId(c.id)}>
-              {c.name}
-            </Chip>
-          ))}
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+          {crops.map((c, i) => {
+            const active = c.id === cropId;
+            return (
+              <button
+                key={c.id}
+                onClick={() => setCropId(c.id)}
+                className="rise"
+                style={{
+                  textAlign: "left", padding: "14px 14px 12px", borderRadius: "var(--radius-md)", cursor: "pointer",
+                  border: `1px solid ${active ? "var(--ink)" : "var(--ink-hairline)"}`, background: active ? "var(--ink)" : "var(--bg-card)",
+                  color: active ? "#fff" : "var(--ink)", display: "flex", flexDirection: "column", gap: 14, transition: "background .15s, color .15s",
+                  animationDelay: `${i * 0.04}s`,
+                }}
+              >
+                <span className="mono" style={{ fontSize: 10.5, opacity: 0.6 }}>{String(i + 1).padStart(2, "0")}</span>
+                <span className="title-serif" style={{ fontSize: 18 }}>{c.name}</span>
+              </button>
+            );
+          })}
         </div>
-        {error && <div style={{ color: "var(--bad)", font: "500 13px var(--font)" }}>{error}</div>}
+        {error && <div className="form-error">{error}</div>}
         <PrimaryButton onClick={next} disabled={!cropId || busy}>
           {busy ? "Сақталуда…" : "Әрі қарай — секторлар"}
         </PrimaryButton>

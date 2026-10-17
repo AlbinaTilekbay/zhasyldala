@@ -2,8 +2,14 @@
    keep this file as the single source of truth for colors/radii/type so
    every screen stays visually consistent with the approved design. */
 :root {
+  /* Type is the main thing that keeps this from looking like a generic
+     template: a bookish serif for headlines (the "agronomist's field
+     journal" voice), a mono for anything that is data — sector labels,
+     counts, dates, step numbers — and Onest for running text. All three
+     cover Kazakh Cyrillic (ә ғ қ ң ө ұ ү һ і). */
   --font: "Onest", system-ui, sans-serif;
-  --mono: ui-monospace, Menlo, monospace;
+  --font-display: "Literata", Georgia, "Times New Roman", serif;
+  --mono: "JetBrains Mono", ui-monospace, Menlo, monospace;
 
   --bg-page: #EFEFEC;
   --bg-shell: #F6F7F6;
@@ -38,9 +44,11 @@
   --rec: #FF4D3D;
   --scan-line: #2FD3B6;
 
-  --radius-lg: 22px;
-  --radius-md: 16px;
-  --radius-sm: 12px;
+  /* Tighter radii than the mockup's pillowy 16–22px — paper and
+     greenhouse glazing, not bubbles. */
+  --radius-lg: 12px;
+  --radius-md: 10px;
+  --radius-sm: 7px;
   --radius-pill: 999px;
 
   --shell-width: 430px;
@@ -70,3 +78,13 @@ button:disabled { cursor: not-allowed; opacity: 0.5; }
 @keyframes gg-pulse { 0%, 100% { opacity: 0.35; } 50% { opacity: 1; } }
 @keyframes gg-rec { 0%, 100% { opacity: 1; } 50% { opacity: 0.2; } }
 @keyframes gg-scanline { 0% { transform: translateY(0); } 100% { transform: translateY(210px); } }
+@keyframes zd-rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+@keyframes zd-draw { to { stroke-dashoffset: 0; } }
+@keyframes zd-pop { 0% { transform: scale(.6); opacity: 0; } 70% { transform: scale(1.08); opacity: 1; } 100% { transform: scale(1); } }
+@keyframes zd-ping { 0% { transform: scale(1); opacity: .55; } 100% { transform: scale(3.2); opacity: 0; } }
+@keyframes zd-sweep { 0% { top: 0; } 100% { top: calc(100% - 2px); } }
+@keyframes zd-fill { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 1ms !important; animation-iteration-count: 1 !important; transition-duration: 1ms !important; }
+}

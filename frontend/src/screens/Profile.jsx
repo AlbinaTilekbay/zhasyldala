@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { api } from "../api/client";
 import AppShell from "../components/AppShell";
 import BottomTabBar from "../components/BottomTabBar";
+import { ArrowIcon, SectionHead } from "../components/ui";
 import { useAuthStore } from "../store/useAuthStore";
 
 export default function Profile() {
@@ -10,7 +11,7 @@ export default function Profile() {
   const user = useAuthStore((s) => s.user);
   const logout = useAuthStore((s) => s.logout);
   const [greenhouse, setGreenhouse] = useState(null);
-  const [scanCount, setScanCount] = useState(0);
+  const [scanCount, setScanCount] = useState(null);
 
   useEffect(() => {
     (async () => {
@@ -23,63 +24,60 @@ export default function Profile() {
   }, []);
 
   function handleLogout() {
+    if (!window.confirm("Аккаунттан шығасыз ба?")) return;
     logout();
     navigate("/welcome");
   }
 
-  const rows = greenhouse
-    ? [
-        { label: "Дақылдар", value: greenhouse.crop?.name || "—" },
-        { label: "Секторлар", value: greenhouse.preset_label || `${greenhouse.sectors.length} сектор` },
-        { label: "QR белгілер", value: "Қайта басып шығару", to: "/setup/qr" },
-        { label: "Шолу еске салғышы", value: `${user?.scan_reminder_days || 7} күнде бір` },
-        { label: "Тіл", value: "Қазақша" },
-      ]
-    : [];
+  const rows = [
+    { label: "Дақыл", value: greenhouse?.crop?.name || "—" },
+    { label: "Секторлар", value: greenhouse ? `${greenhouse.preset_label} · ${greenhouse.sectors.length}` : "—" },
+    { label: "QR белгілер", value: "Басып шығару", to: "/setup/qr" },
+    { label: "Шолу еске салғышы", value: `${user?.scan_reminder_days || 7} күнде бір` },
+    { label: "Тіл", value: "Қазақша" },
+  ];
 
   return (
     <AppShell tabs={<BottomTabBar />}>
       <div className="screen-pad-tight">
-        <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-          <div className="avatar-circle" style={{ width: 54, height: 54, fontSize: 19 }}>{user?.initials}</div>
-          <div>
-            <div style={{ font: "700 18px var(--font)" }}>{user?.full_name}</div>
-            <div className="subtle">{user?.phone} · {greenhouse?.name}</div>
+        <div style={{ display: "flex", alignItems: "center", gap: 14, paddingTop: 6 }}>
+          <div className="avatar-circle" style={{ width: 56, height: 56, fontSize: 21 }}>{user?.initials}</div>
+          <div style={{ minWidth: 0 }}>
+            <div className="title-serif" style={{ fontSize: 21 }}>{user?.full_name}</div>
+            <div className="mono" style={{ fontSize: 12, color: "var(--ink-mute)", marginTop: 3 }}>{user?.phone}</div>
           </div>
         </div>
 
-        <div className="card card-lg" style={{ background: "var(--accent-tint)", display: "flex", gap: 16 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", border: "1px solid var(--ink-hairline)", borderRadius: "var(--radius-md)", background: "var(--bg-card)" }}>
           <ProfileStat value={greenhouse?.sectors.length ?? "—"} label="сектор" />
-          <ProfileStat value={scanCount} label="шолу" />
+          <ProfileStat value={scanCount ?? "—"} label="шолу жасалды" divider />
         </div>
 
-        <div className="card card-lg" style={{ padding: "4px 14px" }}>
-          {rows.map((row) => (
-            <div
-              key={row.label}
-              onClick={() => row.to && navigate(row.to)}
-              style={{
-                display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 0",
-                borderBottom: "1px solid rgba(20,32,30,.06)", cursor: row.to ? "pointer" : "default",
-              }}
-            >
-              <div style={{ font: "500 14px var(--font)" }}>{row.label}</div>
-              <div style={{ font: "500 13px var(--font)", color: "var(--ink-faint)" }}>{row.value}</div>
-            </div>
-          ))}
+        <SectionHead no={1} title={greenhouse?.name || "Жылыжай"} />
+        <div className="ledger">
+          {rows.map((row) => {
+            const Tag = row.to ? "button" : "div";
+            return (
+              <Tag key={row.label} className="ledger-row" onClick={row.to ? () => navigate(row.to) : undefined} style={{ cursor: row.to ? "pointer" : "default" }}>
+                <span style={{ flex: 1, font: "500 14px var(--font)" }}>{row.label}</span>
+                <span style={{ font: "500 13px var(--font)", color: row.to ? "var(--accent)" : "var(--ink-mute)" }}>{row.value}</span>
+                {row.to && <ArrowIcon className="ledger-go" />}
+              </Tag>
+            );
+          })}
         </div>
 
-        <button className="btn btn-danger-ghost" onClick={handleLogout}>Шығу</button>
+        <button className="btn btn-danger-ghost" style={{ marginTop: 8 }} onClick={handleLogout}>Шығу</button>
       </div>
     </AppShell>
   );
 }
 
-function ProfileStat({ value, label }) {
+function ProfileStat({ value, label, divider }) {
   return (
-    <div>
-      <div style={{ font: "800 20px var(--font)", color: "var(--accent)" }}>{value}</div>
-      <div style={{ font: "500 11px var(--font)", color: "#4E635E" }}>{label}</div>
+    <div style={{ padding: "14px 16px", borderLeft: divider ? "1px solid var(--ink-hairline)" : 0 }}>
+      <div style={{ font: "600 26px/1 var(--mono)", color: "var(--accent)" }}>{value}</div>
+      <div style={{ font: "400 12px var(--font)", color: "var(--ink-mute)", marginTop: 6 }}>{label}</div>
     </div>
   );
 }

@@ -6,4 +6,6 @@ from .models import Tip
 @admin.register(Tip)
 class TipAdmin(admin.ModelAdmin):
     list_display = ["title", "crop", "tag", "order", "is_active"]
+    list_editable = ["tag", "order", "is_active"]
     list_filter = ["crop", "tag", "is_active"]
+    search_fields = ["title", "body"]

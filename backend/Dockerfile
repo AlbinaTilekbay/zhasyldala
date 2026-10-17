@@ -7,7 +7,7 @@ WORKDIR /app
 # libgl1/libglib for opencv-python-headless; libpq-dev for psycopg2 build
 # (skip if you switch to psycopg2-binary only, which is what requirements.txt uses).
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    libgl1 libglib2.0-0 \
+    libgl1 libglib2.0-0 fonts-dejavu-core \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt requirements-ml.txt ./

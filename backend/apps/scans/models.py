@@ -1,3 +1,5 @@
+import uuid
+
 from django.conf import settings
 from django.db import models
 
@@ -24,9 +26,19 @@ class ScanSession(models.Model):
     status = models.CharField(max_length=12, choices=Status.choices, default=Status.IN_PROGRESS)
     started_at = models.DateTimeField(auto_now_add=True)
     finished_at = models.DateTimeField(null=True, blank=True)
+    # Set the first time the farmer shares the report (e.g. with an
+    # agronomist) — anyone holding the token can view that one report,
+    # read-only, without an account. Null = never shared.
+    share_token = models.UUIDField(null=True, blank=True, unique=True, editable=False)
 
     class Meta:
         ordering = ["-started_at"]
+
+    def ensure_share_token(self):
+        if not self.share_token:
+            self.share_token = uuid.uuid4()
+            self.save(update_fields=["share_token"])
+        return self.share_token
 
     def __str__(self):
         return f"{self.greenhouse.name} · {self.started_at:%Y-%m-%d}"
@@ -81,6 +93,11 @@ class SectorPhoto(models.Model):
     capture = models.ForeignKey(SectorCapture, on_delete=models.CASCADE, related_name="photos")
     image = models.ImageField(upload_to="sector_photos/%Y/%m/")
     order = models.PositiveSmallIntegerField(default=0)
+    # Random id the phone attaches to each photo — the offline upload
+    # queue may resend a photo whose first upload actually reached the
+    # server (the response was lost), and this lets the server ignore
+    # the duplicate instead of adding the same photo twice.
+    client_id = models.CharField(max_length=64, blank=True, db_index=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

@@ -4,15 +4,11 @@ import { api } from "../../api/client";
 import QrImage from "../../components/QrImage";
 import { TopBar } from "../../components/TopBar";
 import AppShell from "../../components/AppShell";
-import { PrimaryButton } from "../../components/ui";
+import { PrimaryButton, SectionHead, Spinner, StepBar } from "../../components/ui";
 import { useSetupStore } from "../../store/useSetupStore";
 
-// Groups sectors by their actual `row` instead of chunking the flat list
-// by a fixed width — a greenhouse's rows aren't always the same length
-// (see GridSetup.jsx's "Өзім жазамын" custom row-count mode), so a fixed
-// chunk size would cut a row's sectors across two visual rows or merge
-// two short rows into one. `greenhouse.sectors` already arrives ordered
-// by (row, col) from the backend.
+// Groups sectors by their actual `row` — rows aren't always the same
+// length (see GridSetup.jsx's custom row-count mode).
 function groupByRow(sectors) {
   const out = [];
   let currentRow = null;
@@ -26,29 +22,54 @@ function groupByRow(sectors) {
   return out;
 }
 
+async function download(path, filename) {
+  const blob = await api.get(path);
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+// Reached two ways: the last step of the setup wizard (greenhouseId in
+// the wizard store), or later from Profile → "QR белгілер" — the wizard
+// store is empty by then, so fall back to the farmer's own greenhouse
+// instead of requesting /api/greenhouses/null/.
 export default function QrCodes() {
   const navigate = useNavigate();
-  const greenhouseId = useSetupStore((s) => s.greenhouseId);
+  const wizardGreenhouseId = useSetupStore((s) => s.greenhouseId);
   const reset = useSetupStore((s) => s.reset);
+  const inWizard = Boolean(wizardGreenhouseId);
   const [greenhouse, setGreenhouse] = useState(null);
-  const [downloading, setDownloading] = useState(false);
+  const [downloading, setDownloading] = useState(null); // "rows" | "sectors" | null
+  const [error, setError] = useState(null);
 
   useEffect(() => {
-    api.get(`/api/greenhouses/${greenhouseId}/`).then(setGreenhouse);
-  }, [greenhouseId]);
+    (async () => {
+      try {
+        if (wizardGreenhouseId) {
+          setGreenhouse(await api.get(`/api/greenhouses/${wizardGreenhouseId}/`));
+        } else {
+          const list = await api.get("/api/greenhouses/");
+          setGreenhouse((list.results || list)[0] || null);
+        }
+      } catch {
+        setError("Жылыжай жүктелмеді.");
+      }
+    })();
+  }, [wizardGreenhouseId]);
 
-  async function downloadPdf() {
-    setDownloading(true);
+  async function get(kind) {
+    setDownloading(kind);
+    setError(null);
     try {
-      const blob = await api.get(`/api/greenhouses/${greenhouseId}/sectors/qr-sheet.pdf`);
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `${greenhouse?.name || "zhasyldala"}-qr.pdf`;
-      a.click();
-      URL.revokeObjectURL(url);
+      if (kind === "rows") await download(`/api/greenhouses/${greenhouse.id}/rows/qr-sheet.pdf`, "zhasyldala-qatarlar.pdf");
+      else await download(`/api/greenhouses/${greenhouse.id}/sectors/qr-sheet.pdf`, "zhasyldala-sektorlar.pdf");
+    } catch {
+      setError("PDF жүктелмеді. Қайталап көріңіз.");
     } finally {
-      setDownloading(false);
+      setDownloading(null);
     }
   }
 
@@ -62,29 +83,53 @@ export default function QrCodes() {
   return (
     <AppShell>
       <div className="screen-pad">
-        <TopBar to="/setup/grid" title="Сектор QR белгілері" />
-        <p className="subtle">
-          Белгілерді басып шығарып, әр сектордың басына кеуде тұсынан іліп қойыңыз. Белгі видеоны нақты
-          орынға байлайды — сол арқылы сектор өзінің бұрынғы жағдайымен салыстырылады.
-        </p>
-        <div className="sector-grid">
-          {rows.map((row, i) => (
-            <div className="sector-row" key={i}>
-              {row.map((sector) => (
-                <div key={sector.id} className="card" style={{ flex: 1, padding: 9, display: "flex", flexDirection: "column", alignItems: "center", gap: 6 }}>
-                  <QrImage sectorId={sector.id} />
-                  <div style={{ font: "700 11.5px var(--font)" }}>{sector.label}</div>
+        <TopBar to={inWizard ? "/setup/grid" : "/app/profile"} title="QR белгілер" />
+        {inWizard && <StepBar step={3} />}
+        <div>
+          <h1 className="title-lg" style={{ margin: 0 }}>{inWizard ? "Белгілерді басып шығарыңыз" : "QR белгілер"}</h1>
+          <p className="subtle" style={{ marginTop: 8 }}>
+            Ең оңайы — әр қатардың басына бір белгі. Сканерлегенде қосымша сол қатардың келесі секторын ашады.
+          </p>
+        </div>
+
+        {!greenhouse && !error && <div style={{ display: "flex", justifyContent: "center", padding: 30 }}><Spinner /></div>}
+
+        {greenhouse && (
+          <>
+            <SectionHead no={1} title="Қатар белгілері" aside={`${rows.length} бет · A4`} />
+            <div className="card" style={{ display: "flex", gap: 14, alignItems: "center" }}>
+              <div style={{ display: "flex", flexDirection: "column", gap: 3, flex: 1 }}>
+                <div style={{ font: "600 14px var(--font)" }}>Ұсынылады</div>
+                <div style={{ font: "400 12.5px/1.5 var(--font)", color: "var(--ink-mute)" }}>
+                  Бір қатар — бір парақ. Жылыжай торын кейін өзгертсеңіз де, белгілер жарамды болып қалады.
+                </div>
+              </div>
+            </div>
+            <PrimaryButton onClick={() => get("rows")} disabled={!!downloading}>
+              {downloading === "rows" ? "Дайындалуда…" : "Қатар белгілерін жүктеу (PDF)"}
+            </PrimaryButton>
+
+            <SectionHead no={2} title="Әр секторға жеке" aside={`${greenhouse.sectors.length} белгі`} />
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {rows.map((row, i) => (
+                <div key={i} style={{ display: "grid", gridTemplateColumns: `16px repeat(${Math.max(...rows.map((r) => r.length))}, minmax(0, 1fr))`, gap: 6, alignItems: "center" }}>
+                  <span className="mono" style={{ fontSize: 10.5, color: "var(--ink-faint)" }}>{row[0]?.label.replace(/\d+$/, "")}</span>
+                  {row.map((sector) => (
+                    <div key={sector.id} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4, padding: 5, border: "1px solid var(--ink-hairline)", borderRadius: 6, background: "var(--bg-card)" }}>
+                      <QrImage sectorId={sector.id} />
+                      <span className="mono" style={{ fontSize: 10.5, fontWeight: 600 }}>{sector.label}</span>
+                    </div>
+                  ))}
                 </div>
               ))}
             </div>
-          ))}
-        </div>
-        <div style={{ display: "flex", gap: 10 }}>
-          <button className="btn btn-ghost" style={{ flex: 1 }} onClick={downloadPdf} disabled={downloading}>
-            {downloading ? "Дайындалуда…" : "PDF жүктеу"}
-          </button>
-          <PrimaryButton style={{ flex: 1 }} onClick={finish}>Дайын</PrimaryButton>
-        </div>
+            <button className="btn btn-ghost" onClick={() => get("sectors")} disabled={!!downloading}>
+              {downloading === "sectors" ? "Дайындалуда…" : "Сектор белгілерін жүктеу (PDF)"}
+            </button>
+          </>
+        )}
+        {error && <div className="form-error">{error}</div>}
+        {inWizard && <PrimaryButton onClick={finish}>Дайын — басты бетке</PrimaryButton>}
       </div>
     </AppShell>
   );

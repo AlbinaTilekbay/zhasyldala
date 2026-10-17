@@ -3,8 +3,10 @@ import { useNavigate } from "react-router-dom";
 import { api, mediaUrl } from "../../api/client";
 import AppShell from "../../components/AppShell";
 import { BackButton } from "../../components/TopBar";
-import { AiNarrative, BulletList, NumberedList, PrimaryButton, SeverityBadge, Spinner, narrativeHasCards } from "../../components/ui";
+import Analyzing from "../../components/Analyzing";
+import { AiNarrative, BulletList, NumberedList, PrimaryButton, SectionHead, SeverityBadge, narrativeHasCards } from "../../components/ui";
 import { useCamera } from "../../hooks/useCamera";
+import { QUALITY_TEXT, checkPhotoQuality } from "../../offline/photoQuality";
 
 // Ports the mockup's plant_capture -> plant_analyzing -> plant_result
 // sequence as one local step machine (no backend state needed between
@@ -13,14 +15,19 @@ export default function HomePlantFlow() {
   const navigate = useNavigate();
   const [step, setStep] = useState("capture"); // capture | analyzing | result | error
   const [result, setResult] = useState(null);
+  const [preview, setPreview] = useState(null); // object URL of the photo just taken
+  const [qualityPrompt, setQualityPrompt] = useState(null); // {blob, url, issue} before sending
   const camera = useCamera();
   const pollRef = useRef(null);
 
+  // (Re)start the camera whenever we're back on the capture step — after
+  // the render, so the freshly mounted <video> gets the stream.
   useEffect(() => {
-    camera.start();
-    return () => camera.stop();
+    if (step === "capture") camera.start();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [step]);
+
+  useEffect(() => () => camera.stop(), []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => () => clearInterval(pollRef.current), []);
 
@@ -49,6 +56,27 @@ export default function HomePlantFlow() {
   async function handleCapture() {
     const blob = await camera.capturePhoto();
     if (!blob) return;
+    const quality = await checkPhotoQuality(blob);
+    if (quality.issue) {
+      setQualityPrompt({ blob, url: URL.createObjectURL(blob), issue: quality.issue });
+      return;
+    }
+    await analyze(blob);
+  }
+
+  async function resolveQuality(keep) {
+    const prompt = qualityPrompt;
+    setQualityPrompt(null);
+    if (!prompt) return;
+    URL.revokeObjectURL(prompt.url);
+    if (keep) await analyze(prompt.blob);
+  }
+
+  async function analyze(blob) {
+    setPreview((old) => {
+      if (old) URL.revokeObjectURL(old);
+      return URL.createObjectURL(blob);
+    });
     setStep("analyzing");
     camera.stop();
     try {
@@ -69,18 +97,18 @@ export default function HomePlantFlow() {
         <div style={{ height: "100%", display: "flex", flexDirection: "column", minHeight: "100dvh" }}>
           <div style={{ padding: "6px 20px 12px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
             <BackButton to="/role" dark />
-            <div style={{ flex: 1, textAlign: "center", font: "600 14px var(--font)", color: "#fff" }}>Өсімдік суреті</div>
+            <div style={{ flex: 1, textAlign: "center", font: "500 11px var(--mono)", letterSpacing: ".08em", textTransform: "uppercase", color: "rgba(255,255,255,.7)" }}>Өсімдік суреті</div>
             <div style={{ width: 34 }} />
           </div>
           <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", padding: "0 20px" }}>
             <div
               style={{
-                width: "100%", aspectRatio: "3/4", borderRadius: 22, overflow: "hidden", position: "relative",
+                width: "100%", aspectRatio: "3/4", borderRadius: 14, overflow: "hidden", position: "relative",
                 border: "1px solid rgba(255,255,255,.14)", background: "#161D1A",
               }}
             >
               <video ref={camera.videoRef} muted playsInline style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-              <div style={{ position: "absolute", inset: 22, border: "1.5px dashed rgba(255,255,255,.28)", borderRadius: 16 }} />
+              <ViewfinderCorners />
               {!camera.ready && (
                 <div
                   style={{
@@ -92,11 +120,7 @@ export default function HomePlantFlow() {
                     camera.error
                   ) : (
                     <>
-                      камера
-                      <br />
-                      жапырақты
-                      <br />
-                      тұтас түсіріңіз
+                      камера қосылуда…
                     </>
                   )}
                 </div>
@@ -105,14 +129,33 @@ export default function HomePlantFlow() {
           </div>
           <div style={{ padding: "22px 20px 30px", display: "flex", flexDirection: "column", gap: 14, alignItems: "center" }}>
             <div style={{ font: "400 12.5px var(--font)", color: "rgba(255,255,255,.6)", textAlign: "center" }}>
-              Жарық артта болмасын. Дақ түскен жапырақты жақыннан түсіріңіз.
+              Дақ түскен жапырақты жақыннан, жарыққа қаратып түсіріңіз. Жарық артта болмасын.
             </div>
             <button
               onClick={handleCapture}
               disabled={!camera.ready}
-              style={{ width: 74, height: 74, borderRadius: "50%", border: "4px solid rgba(255,255,255,.3)", background: "#fff" }}
+              aria-label="Суретке түсіру"
+              style={{ width: 76, height: 76, borderRadius: "50%", border: "5px solid rgba(255,255,255,.22)", background: "#fff", backgroundClip: "padding-box", opacity: camera.ready ? 1 : 0.4, transition: "transform .1s" }}
+              onPointerDown={(e) => { e.currentTarget.style.transform = "scale(.92)"; }}
+              onPointerUp={(e) => { e.currentTarget.style.transform = ""; }}
             />
           </div>
+          {qualityPrompt && (
+            <div style={{ position: "fixed", inset: 0, zIndex: 40, background: "rgba(12,17,15,.7)", display: "flex", alignItems: "flex-end", justifyContent: "center" }}>
+              <div style={{ width: "100%", maxWidth: 430, background: "var(--bg-shell)", color: "var(--ink)", borderRadius: "16px 16px 0 0", padding: "18px 20px calc(env(safe-area-inset-bottom, 0px) + 22px)", display: "flex", flexDirection: "column", gap: 14, animation: "zd-rise .25s both" }}>
+                <div style={{ display: "flex", gap: 14, alignItems: "center" }}>
+                  <img src={qualityPrompt.url} alt="" style={{ width: 64, height: 80, objectFit: "cover", borderRadius: 6, flex: "none" }} />
+                  <div>
+                    <span className="badge badge-warn">Сапа</span>
+                    <div className="title-serif" style={{ fontSize: 20, marginTop: 6 }}>{QUALITY_TEXT[qualityPrompt.issue].title}</div>
+                  </div>
+                </div>
+                <p className="subtle" style={{ fontSize: 14 }}>{QUALITY_TEXT[qualityPrompt.issue].body} Анық фото — дәлірек диагноз.</p>
+                <PrimaryButton onClick={() => resolveQuality(false)}>Қайта түсіру</PrimaryButton>
+                <button className="btn btn-ghost" onClick={() => resolveQuality(true)}>Осылай жіберу</button>
+              </div>
+            </div>
+          )}
         </div>
       </AppShell>
     );
@@ -121,13 +164,7 @@ export default function HomePlantFlow() {
   if (step === "analyzing") {
     return (
       <AppShell>
-        <div style={{ height: "100%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 20, padding: 40, minHeight: "100dvh" }}>
-          <Spinner />
-          <div className="title-md">Сурет талданып жатыр</div>
-          <div className="subtle" style={{ textAlign: "center", maxWidth: 240 }}>
-            240 ауру мен қоректік зат тапшылығының базасымен салыстырылады
-          </div>
-        </div>
+        <Analyzing photoUrl={preview} title="Сурет талданып жатыр" />
       </AppShell>
     );
   }
@@ -135,10 +172,11 @@ export default function HomePlantFlow() {
   if (step === "error") {
     return (
       <AppShell>
-        <div className="screen-pad" style={{ minHeight: "100dvh", justifyContent: "center", alignItems: "center", textAlign: "center" }}>
-          <div className="title-md">Талдау сәтсіз аяқталды</div>
-          <p className="subtle">Интернет байланысын тексеріп, қайта көріңіз.</p>
-          <PrimaryButton onClick={() => setStep("capture")}>Қайталау</PrimaryButton>
+        <div className="screen-pad" style={{ minHeight: "100dvh", justifyContent: "center" }}>
+          <div className="eyebrow" style={{ color: "var(--bad)" }}>Қате</div>
+          <h1 className="title-lg" style={{ margin: 0 }}>Талдау аяқталмады</h1>
+          <p className="subtle">Көбіне себебі — интернеттің әлсіздігі. Байланысты тексеріп, қайта түсіріп көріңіз.</p>
+          <PrimaryButton onClick={() => { setStep("capture"); }}>Қайта түсіру</PrimaryButton>
         </div>
       </AppShell>
     );
@@ -171,48 +209,81 @@ export default function HomePlantFlow() {
   }
   if (!adviceItems) adviceItems = ["Күтімді жалғастырыңыз."];
 
+  // source "rule" = nothing actually analysed the photo (no OpenAI key /
+  // no internet, no trained model). Say so plainly instead of showing a
+  // reassuring "healthy" result with a technical message.
+  if (diag?.source === "rule") {
+    return (
+      <AppShell>
+        <div className="screen-pad" style={{ minHeight: "100dvh", justifyContent: "center" }}>
+          {preview && <img src={preview} alt="" style={{ width: 96, height: 120, objectFit: "cover", borderRadius: 8 }} />}
+          <span className="badge badge-none" style={{ alignSelf: "flex-start" }}>Анықталмады</span>
+          <h1 className="title-lg" style={{ margin: 0 }}>Суретті талдай алмадық</h1>
+          <p className="subtle" style={{ fontSize: 14 }}>
+            Талдау қызметіне қосылу мүмкін болмады — көбіне интернет әлсіз болғанда болады. Байланысты тексеріп, қайта түсіріп көріңіз.
+          </p>
+          <PrimaryButton onClick={() => { setResult(null); setStep("capture"); }}>Қайта түсіру</PrimaryButton>
+        </div>
+      </AppShell>
+    );
+  }
+
+  const severity = diag?.severity || "ok";
+  const tone = { ok: "var(--accent)", warn: "var(--warn-ink)", bad: "var(--bad-ink)" }[severity];
+  const title = disease?.name || narrative?.condition_name || (isAiResult ? diag?.species_guess || "Нәтиже белгісіз" : "Ауру белгісі табылмады");
+  const description = disease?.description || narrative?.description || (isAiResult ? "" : "Өсімдік қалыпты көрінеді.");
+
   return (
     <AppShell>
       <div className="screen-pad">
         <div className="topbar">
-          <BackButton onClick={() => setStep("capture")} />
-          <div className="title-md">Нәтиже</div>
+          <BackButton onClick={() => { setStep("capture"); }} />
+          <div className="step-label" style={{ flex: 1 }}>Нәтиже</div>
         </div>
-        <div className="card card-lg" style={{ padding: 0, overflow: "hidden" }}>
-          <div className="placeholder-photo" style={{ height: 150 }}>
-            {result?.image ? (
-              <img src={mediaUrl(result.image)} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-            ) : (
-              "жапырақ суреті"
+        <div className="rise" style={{ display: "grid", gridTemplateColumns: "96px 1fr", gap: 14, alignItems: "start" }}>
+          <div style={{ width: 96, height: 120, borderRadius: 8, overflow: "hidden", background: "var(--unscanned-tint)" }}>
+            {(result?.image || preview) && (
+              <img src={result?.image ? mediaUrl(result.image) : preview} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
             )}
           </div>
-          <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 10 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <SeverityBadge severity={diag?.severity || "ok"} />
-              <span style={{ font: "500 12px var(--font)", color: "var(--ink-mute)" }}>
-                Сенімділік {Math.round((diag?.confidence || 0) * 100)}%
-              </span>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8, minWidth: 0 }}>
+            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+              <SeverityBadge severity={severity} />
+              {diag?.confidence > 0 && <span className="mono" style={{ fontSize: 11, color: "var(--ink-mute)" }}>{Math.round(diag.confidence * 100)}%</span>}
             </div>
-            <div style={{ font: "700 20px var(--font)" }}>
-              {disease?.name || narrative?.condition_name || (isAiResult ? diag?.species_guess || "Нәтиже белгісіз" : "Ауру белгісі табылмады")}
-            </div>
-            <div className="subtle">
-              {disease?.description || narrative?.description || (isAiResult ? (showCards ? "Толығырақ — төменде." : "") : "Өсімдік қалыпты көрінеді.")}
-            </div>
+            <h1 className="title-serif" style={{ margin: 0, fontSize: 24, lineHeight: 1.15, color: severity === "ok" ? "var(--ink)" : tone }}>{title}</h1>
+            {diag?.species_guess && title !== diag.species_guess && (
+              <div className="mono" style={{ fontSize: 11.5, color: "var(--ink-mute)" }}>{diag.species_guess}</div>
+            )}
           </div>
         </div>
+        {description && <p className="subtle" style={{ fontSize: 14 }}>{description}</p>}
         {showCards ? (
           <AiNarrative narrative={narrative} />
         ) : (
-          <div className="card card-lg">
-            <div style={{ font: "700 14px var(--font)", marginBottom: 12 }}>{adviceTitle}</div>
+          <>
+            <SectionHead no={1} title={adviceTitle} />
             {adviceTitle === "Байқалған белгілер" ? <BulletList items={adviceItems} /> : <NumberedList items={adviceItems} />}
-          </div>
+          </>
         )}
-        <button className="btn btn-ghost" onClick={() => navigate("/register")}>
-          Жылыжайым бар — секторларға өту
-        </button>
+        <PrimaryButton onClick={() => { setResult(null); setStep("capture"); }}>Басқа өсімдікті тексеру</PrimaryButton>
+        <div className="note" style={{ marginTop: 4 }}>
+          Жылыжайыңыз бар ма? Тіркеліп, әр секторды апта сайын бақылаңыз — жүйе ауруды қай жерде басталғанын көрсетеді.
+          <div><button className="btn-link" onClick={() => navigate("/register")}>Жылыжайды тіркеу</button></div>
+        </div>
       </div>
     </AppShell>
+  );
+}
+
+function ViewfinderCorners() {
+  const base = { position: "absolute", width: 28, height: 28, borderColor: "rgba(255,255,255,.85)", borderStyle: "solid", borderWidth: 0 };
+  return (
+    <div style={{ position: "absolute", inset: 18, pointerEvents: "none" }}>
+      <span style={{ ...base, top: 0, left: 0, borderTopWidth: 2, borderLeftWidth: 2, borderTopLeftRadius: 6 }} />
+      <span style={{ ...base, top: 0, right: 0, borderTopWidth: 2, borderRightWidth: 2, borderTopRightRadius: 6 }} />
+      <span style={{ ...base, bottom: 0, left: 0, borderBottomWidth: 2, borderLeftWidth: 2, borderBottomLeftRadius: 6 }} />
+      <span style={{ ...base, bottom: 0, right: 0, borderBottomWidth: 2, borderRightWidth: 2, borderBottomRightRadius: 6 }} />
+    </div>
   );
 }

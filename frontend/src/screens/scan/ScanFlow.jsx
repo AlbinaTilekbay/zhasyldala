@@ -1,13 +1,19 @@
 import jsQR from "jsqr";
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { api, mediaUrl } from "../../api/client";
-import { PrimaryButton, Spinner } from "../../components/ui";
+import { api } from "../../api/client";
+import Analyzing from "../../components/Analyzing";
+import QueueBanner from "../../components/QueueBanner";
+import { QUALITY_TEXT, checkPhotoQuality } from "../../offline/photoQuality";
+import {
+  enqueueFinishSector, enqueueFinishSession, enqueuePhoto, newClientId, removeQueuedPhoto, waitForSession,
+} from "../../offline/uploadQueue";
+import { GreenhouseMap, PrimaryButton, Spinner } from "../../components/ui";
 import { useCamera } from "../../hooks/useCamera";
 
-// Matches the backend defaults (config/settings.py SECTOR_PHOTOS_MIN/MAX)
-// — used only before the first photo of a sector is uploaded, since only
-// then do we have the server's own capture.min_photos/max_photos to go by.
+// Matches the backend defaults (config/settings.py SECTOR_PHOTOS_MIN/MAX).
+// Photos are counted on the phone (they may still be in the offline
+// queue), so these are the limits the capture screen enforces.
 const DEFAULT_MIN_PHOTOS = 3;
 const DEFAULT_MAX_PHOTOS = 10;
 
@@ -23,13 +29,6 @@ const GUIDED_HINTS = [
   "3-фото: жапырақтың астыңғы бетін немесе түптің түбірін түсіріңіз.",
 ];
 
-function withTimeout(promise, ms, message) {
-  return Promise.race([
-    promise,
-    new Promise((_, reject) => setTimeout(() => reject(new Error(message)), ms)),
-  ]);
-}
-
 // Ports scan_qr -> scan_confirm -> scan_photos -> (loop) -> scan_done ->
 // analyzing -> report as one local step machine driving real API calls
 // (create session, upload each sector's photos one at a time, finish the
@@ -43,22 +42,40 @@ export default function ScanFlow() {
   const [scannedIds, setScannedIds] = useState([]);
   const [current, setCurrent] = useState(null);
   const [step, setStep] = useState("loading"); // loading|scan_qr|scan_confirm|scan_photos|scan_done|analyzing
-  const [capture, setCapture] = useState(null); // this sector's SectorCapture, once the first photo is uploaded
-  const [capturing, setCapturing] = useState(false); // taking + uploading one photo
-  const [finishing, setFinishing] = useState(false); // finishing the sector (running diagnosis)
+  // This sector's photos as taken on the phone: {clientId, url}. They go
+  // into the offline upload queue immediately; the walkthrough never
+  // waits for the network (see offline/uploadQueue.js).
+  const [shots, setShots] = useState([]);
+  const [capturing, setCapturing] = useState(false); // grabbing + checking one photo
+  const [finishing, setFinishing] = useState(false);
+  const [qualityPrompt, setQualityPrompt] = useState(null); // {blob, url, issue} awaiting "retake / keep"
+  const [savedOffline, setSavedOffline] = useState(false); // report waits for the connection
   const [photoError, setPhotoError] = useState(null);
   const qrTimerRef = useRef(null);
   const canvasRef = useRef(document.createElement("canvas"));
 
+  const [picking, setPicking] = useState(false); // manual sector picker open
+  const [lastPhoto, setLastPhoto] = useState(null); // shown on the "analyzing" screen
+  const [loadError, setLoadError] = useState(null);
+
   useEffect(() => {
     (async () => {
-      const greenhouses = await api.get("/api/greenhouses/");
-      const gh = (greenhouses.results || greenhouses)[0];
-      const created = await api.post("/api/scan-sessions/", { greenhouse: gh.id });
-      setSession(created);
-      setSectors(gh.sectors);
-      setStep("scan_qr");
+      try {
+        const greenhouses = await api.get("/api/greenhouses/");
+        const gh = (greenhouses.results || greenhouses)[0];
+        if (!gh) {
+          navigate("/app", { replace: true });
+          return;
+        }
+        const created = await api.post("/api/scan-sessions/", { greenhouse: gh.id });
+        setSession(created);
+        setSectors(gh.sectors);
+        setStep("scan_qr");
+      } catch {
+        setLoadError("Шолу басталмады — интернет байланысын тексеріңіз.");
+      }
     })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -98,7 +115,7 @@ export default function ScanFlow() {
     try {
       const sector = await api.get(`/api/sectors/by-token/${token}/`);
       setCurrent(sector);
-      setCapture(null);
+      setShots([]);
       setStep("scan_confirm");
     } catch {
       // unresolved token — keep scanning
@@ -126,16 +143,18 @@ export default function ScanFlow() {
     clearInterval(qrTimerRef.current);
     setPhotoError(null);
     setCurrent(next);
-    setCapture(null);
+    setShots([]);
     setStep("scan_confirm");
   }
 
-  function pickNextUnscannedDemo() {
-    const remaining = sectors.filter((s) => !scannedIds.includes(s.id));
-    if (remaining.length === 0) return;
-    setCurrent(remaining[0]);
-    setCapture(null);
-    setStep("scan_photos");
+  // Fallback for a torn/unprinted QR label: pick the sector on the map.
+  function pickSector(sector) {
+    clearInterval(qrTimerRef.current);
+    setPicking(false);
+    setPhotoError(null);
+    setCurrent(sector);
+    setShots([]);
+    setStep("scan_confirm");
   }
 
   async function takePhoto() {
@@ -145,13 +164,12 @@ export default function ScanFlow() {
     try {
       const blob = await camera.capturePhoto();
       if (!blob) throw new Error("Камера дайын емес — қайталап көріңіз.");
-      const form = new FormData();
-      form.append("image", blob, `sector-${current.label}-${(capture?.photo_count || 0) + 1}.jpg`);
-      const updated = await withTimeout(
-        api.post(`/api/scan-sessions/${session.id}/sectors/${current.id}/photos/`, form, { isForm: true }),
-        20000, "Фото жүктелмеді — интернет байланысын тексеріп, қайталаңыз."
-      );
-      setCapture(updated);
+      const quality = await checkPhotoQuality(blob);
+      if (quality.issue) {
+        setQualityPrompt({ blob, url: URL.createObjectURL(blob), issue: quality.issue });
+        return;
+      }
+      await keepPhoto(blob);
     } catch (err) {
       setPhotoError(err?.message || "Фото түсірілмеді. Қайталап көріңіз.");
     } finally {
@@ -159,15 +177,34 @@ export default function ScanFlow() {
     }
   }
 
+  async function keepPhoto(blob, url = URL.createObjectURL(blob)) {
+    const clientId = newClientId();
+    await enqueuePhoto({ sessionId: session.id, sectorId: current.id, blob, clientId });
+    setShots((prev) => [...prev, { clientId, url }]);
+    setLastPhoto(url);
+  }
+
+  async function resolveQuality(keep) {
+    const prompt = qualityPrompt;
+    setQualityPrompt(null);
+    if (!prompt) return;
+    if (keep) await keepPhoto(prompt.blob, prompt.url);
+    else URL.revokeObjectURL(prompt.url);
+  }
+
   async function undoLastPhoto() {
-    if (capturing || !capture || capture.photo_count === 0) return;
+    const last = shots[shots.length - 1];
+    if (capturing || !last) return;
     setCapturing(true);
     setPhotoError(null);
     try {
-      const updated = await api.post(`/api/scan-sessions/${session.id}/sectors/${current.id}/photos/undo/`, {});
-      setCapture(updated);
-    } catch (err) {
-      setPhotoError(err?.message || "Фотоны алып тастау сәтсіз аяқталды.");
+      // Still waiting in the queue -> just drop it; already on the
+      // server -> undo there (needs a connection).
+      const dropped = await removeQueuedPhoto(last.clientId);
+      if (!dropped) await api.post(`/api/scan-sessions/${session.id}/sectors/${current.id}/photos/undo/`, {});
+      setShots((prev) => prev.slice(0, -1));
+    } catch {
+      setPhotoError("Фото серверге жіберіліп қойған — оны өшіру үшін интернет керек.");
     } finally {
       setCapturing(false);
     }
@@ -178,60 +215,81 @@ export default function ScanFlow() {
     setFinishing(true);
     setPhotoError(null);
     try {
-      await withTimeout(
-        api.post(`/api/scan-sessions/${session.id}/sectors/${current.id}/finish/`, {}),
-        45000, "Сектор талданбады — интернет байланысын тексеріп, қайталаңыз."
-      );
+      await enqueueFinishSector({ sessionId: session.id, sectorId: current.id });
       const newScanned = [...scannedIds, current.id];
       setScannedIds(newScanned);
       setCurrent(null);
-      setCapture(null);
+      setShots([]);
       if (newScanned.length >= sectors.length) setStep("scan_done");
       else setStep("scan_qr");
-    } catch (err) {
-      setPhotoError(err?.message || "Сектор талданбады. Интернет байланысын тексеріп, қайталаңыз.");
+    } catch {
+      setPhotoError("Сақталмады — телефон жадын тексеріп, қайталаңыз.");
     } finally {
       setFinishing(false);
     }
   }
 
   async function finishScan() {
+    setPhotoError(null);
+    await enqueueFinishSession({ sessionId: session.id });
     setStep("analyzing");
-    try {
-      await withTimeout(
-        api.post(`/api/scan-sessions/${session.id}/finish/`, {}),
-        30000, "Есеп құрылмады — интернет байланысын тексеріп, қайталаңыз."
-      );
-      navigate(`/app/report/${session.id}`);
-    } catch (err) {
-      setPhotoError(err?.message || "Есеп құрылмады. Интернет байланысын тексеріп, қайталаңыз.");
-      setStep(scannedIds.length > 0 ? "scan_done" : "scan_qr");
-    }
+    // Photos and diagnoses go up in the background; wait for them if
+    // there's a connection, otherwise tell the farmer it's saved and the
+    // report will appear once the phone is back online.
+    const delivered = await waitForSession(session.id, navigator.onLine === false ? 4000 : 120000);
+    if (delivered) navigate(`/app/report/${session.id}`);
+    else setSavedOffline(true);
   }
 
   if (step === "loading") {
     return (
-      <div style={{ height: "100dvh", display: "flex", alignItems: "center", justifyContent: "center", background: "var(--bg-shell-dark)" }}>
-        <Spinner />
+      <div style={{ height: "100dvh", display: "flex", flexDirection: "column", gap: 18, alignItems: "center", justifyContent: "center", background: "var(--bg-shell-dark)", color: "#fff", padding: 30, textAlign: "center" }}>
+        {loadError ? (
+          <>
+            <div style={{ font: "500 14px/1.5 var(--font)" }}>{loadError}</div>
+            <button className="btn btn-on-dark" onClick={() => navigate("/app")}>Басты бетке</button>
+          </>
+        ) : <Spinner />}
+      </div>
+    );
+  }
+
+  if (step === "analyzing" && savedOffline) {
+    return (
+      <div style={{ minHeight: "100dvh", display: "flex", flexDirection: "column", justifyContent: "center", gap: 16, padding: "30px 26px", background: "var(--bg-shell)", color: "var(--ink)" }}>
+        <span className="badge badge-warn" style={{ alignSelf: "flex-start" }}>Желі жоқ</span>
+        <h1 className="title-lg" style={{ margin: 0 }}>Шолу телефонда сақталды</h1>
+        <p className="subtle" style={{ fontSize: 14 }}>
+          {scannedIds.length} сектордың фотолары жоғалмайды. Интернет пайда болғанда олар өзі жіберіледі, есеп «Шолулар тарихы» бөлімінде шығады.
+        </p>
+        <QueueBanner />
+        <PrimaryButton onClick={() => navigate("/app")}>Басты бетке</PrimaryButton>
       </div>
     );
   }
 
   if (step === "analyzing") {
     return (
-      <div style={{ height: "100dvh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 18, padding: 40, background: "var(--bg-shell)" }}>
-        <Spinner />
-        <div className="title-md">Есеп дайындалып жатыр</div>
-        <div className="subtle">Секторлар бойынша нәтижелер жиналуда</div>
-      </div>
+      <Analyzing
+        photoUrl={lastPhoto}
+        title="Есеп дайындалып жатыр"
+        steps={["Фотолар жиналды", "Секторлар салыстырылуда", "Жылыжай картасы толтырылуда", "Есеп дайындалуда"]}
+      />
     );
   }
 
   if (step === "scan_done") {
     return (
-      <div style={{ height: "100dvh", display: "flex", flexDirection: "column", justifyContent: "center", gap: 20, padding: "30px 26px", textAlign: "center", alignItems: "center", background: "var(--bg-shell)" }}>
-        <div style={{ width: 58, height: 58, borderRadius: 20, background: "var(--accent-tint)", color: "var(--accent)", display: "flex", alignItems: "center", justifyContent: "center", font: "700 26px var(--font)" }}>✓</div>
-        <div className="title-lg">Шолу аяқталды</div>
+      <div style={{ minHeight: "100dvh", display: "flex", flexDirection: "column", justifyContent: "center", gap: 18, padding: "30px 26px", textAlign: "center", alignItems: "center", background: "var(--bg-shell)", color: "var(--ink)" }}>
+        <div className="eyebrow" style={{ color: "var(--accent)" }}>{scannedIds.length} / {sectors.length} сектор</div>
+        <div className="title-lg" style={{ color: "var(--ink)" }}>Шолу аяқталды</div>
+        <div style={{ width: "100%", maxWidth: 300 }}>
+          <GreenhouseMap
+            compact
+            entrance={false}
+            rows={groupRows(sectors).map((row) => row.map((sec) => ({ key: sec.id, label: sec.label, tag: scannedIds.includes(sec.id) ? "ok" : "unscanned" })))}
+          />
+        </div>
         <div className="subtle" style={{ maxWidth: 270 }}>
           Түсірілген сектор: {sectors.length} ішінен {scannedIds.length}. Түсірілмегендері есепте сұр болып қалады — кейін толықтыруға болады.
         </div>
@@ -239,7 +297,7 @@ export default function ScanFlow() {
           <div style={{ font: "500 12.5px var(--font)", color: "var(--rec)", maxWidth: 270 }}>{photoError}</div>
         )}
         <PrimaryButton onClick={finishScan}>Есеп құру</PrimaryButton>
-        <button className="btn btn-ghost" onClick={() => setStep("scan_qr")}>Қалған секторларды түсіру</button>
+        {scannedIds.length < sectors.length && <button className="btn btn-ghost" onClick={() => setStep("scan_qr")}>Қалған секторларды түсіру</button>}
       </div>
     );
   }
@@ -248,15 +306,15 @@ export default function ScanFlow() {
     return (
       <div style={{ height: "100dvh", display: "flex", flexDirection: "column", justifyContent: "space-between", background: "var(--bg-shell-dark)", padding: "24px 24px 30px", color: "#fff" }}>
         <div style={{ display: "flex", flexDirection: "column", gap: 24, marginTop: 40 }}>
-          <div style={{ width: 56, height: 56, borderRadius: 18, background: "var(--scan-line)", color: "#0B2621", display: "flex", alignItems: "center", justifyContent: "center", font: "700 24px var(--font)" }}>✓</div>
+          <div style={{ font: "500 11px var(--mono)", letterSpacing: ".1em", textTransform: "uppercase", color: "var(--scan-line)" }}>● Белгі танылды</div>
           <div>
-            <div style={{ font: "500 13px var(--font)", color: "rgba(255,255,255,.55)" }}>Белгі танылды</div>
-            <div style={{ font: "800 40px/1.1 var(--font)", marginTop: 6 }}>{current?.label} секторы</div>
+            <div style={{ font: "600 84px/1 var(--mono)", letterSpacing: "-0.04em", animation: "zd-pop .45s both" }}>{current?.label}</div>
+            <div style={{ font: "500 22px var(--font-display)", marginTop: 8 }}>секторы</div>
             <div style={{ font: "400 14px/1.6 var(--font)", color: "rgba(255,255,255,.6)", marginTop: 12, maxWidth: 280 }}>
               {current?.plant_count} түп
             </div>
           </div>
-          <div style={{ background: "rgba(255,255,255,.07)", borderRadius: 16, padding: "14px 16px", font: "400 13px/1.6 var(--font)", color: "rgba(255,255,255,.75)" }}>
+          <div style={{ borderLeft: "2px solid var(--scan-line)", padding: "4px 0 4px 14px", font: "400 13px/1.6 var(--font)", color: "rgba(255,255,255,.75)" }}>
             Енді кемінде {DEFAULT_MIN_PHOTOS} фото түсіресіз (ең көбі {DEFAULT_MAX_PHOTOS}) — әр қадамда не түсіру керегін көрсетеміз.
           </div>
         </div>
@@ -267,9 +325,9 @@ export default function ScanFlow() {
 
   // scan_photos
   if (step === "scan_photos") {
-    const photoCount = capture?.photo_count || 0;
-    const minPhotos = capture?.min_photos ?? DEFAULT_MIN_PHOTOS;
-    const maxPhotos = capture?.max_photos ?? DEFAULT_MAX_PHOTOS;
+    const photoCount = shots.length;
+    const minPhotos = DEFAULT_MIN_PHOTOS;
+    const maxPhotos = DEFAULT_MAX_PHOTOS;
     const canFinish = photoCount >= minPhotos;
     const atMax = photoCount >= maxPhotos;
     const hint = photoCount < GUIDED_HINTS.length
@@ -293,10 +351,10 @@ export default function ScanFlow() {
 
         {photoCount > 0 && (
           <div style={{ display: "flex", gap: 8, padding: "0 20px", overflowX: "auto" }}>
-            {capture.photos.map((p) => (
+            {shots.map((p) => (
               <img
-                key={p.id}
-                src={mediaUrl(p.image)}
+                key={p.clientId}
+                src={p.url}
                 alt=""
                 style={{ width: 46, height: 46, borderRadius: 10, objectFit: "cover", flex: "none", border: "1px solid rgba(255,255,255,.2)" }}
               />
@@ -341,6 +399,23 @@ export default function ScanFlow() {
             {finishing ? <Spinner /> : `Сектор дайын${canFinish ? "" : ` (кемінде ${minPhotos} фото керек)`}`}
           </button>
         </div>
+
+        {qualityPrompt && (
+          <div style={{ position: "fixed", inset: 0, zIndex: 40, background: "rgba(12,17,15,.7)", display: "flex", alignItems: "flex-end", justifyContent: "center" }}>
+            <div style={{ width: "100%", maxWidth: 430, background: "var(--bg-shell)", color: "var(--ink)", borderRadius: "16px 16px 0 0", padding: "18px 20px calc(env(safe-area-inset-bottom, 0px) + 22px)", display: "flex", flexDirection: "column", gap: 14, animation: "zd-rise .25s both" }}>
+              <div style={{ display: "flex", gap: 14, alignItems: "center" }}>
+                <img src={qualityPrompt.url} alt="" style={{ width: 64, height: 80, objectFit: "cover", borderRadius: 6, flex: "none" }} />
+                <div>
+                  <span className="badge badge-warn">Сапа</span>
+                  <div className="title-serif" style={{ fontSize: 20, marginTop: 6 }}>{QUALITY_TEXT[qualityPrompt.issue].title}</div>
+                </div>
+              </div>
+              <p className="subtle" style={{ fontSize: 14 }}>{QUALITY_TEXT[qualityPrompt.issue].body} Анық фото — дәлірек диагноз.</p>
+              <PrimaryButton onClick={() => resolveQuality(false)}>Қайта түсіру</PrimaryButton>
+              <button className="btn btn-ghost" onClick={() => resolveQuality(true)}>Осы фотоны қалдыру</button>
+            </div>
+          </div>
+        )}
       </div>
     );
   }
@@ -355,23 +430,67 @@ export default function ScanFlow() {
         </div>
         <div style={{ width: 34 }} />
       </div>
+      <div style={{ padding: "0 20px" }}><QueueBanner dark /></div>
       <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 22, padding: "0 26px" }}>
-        <div style={{ width: 230, height: 230, borderRadius: 26, position: "relative", overflow: "hidden", background: "#161D1A" }}>
+        <div style={{ width: 240, height: 240, borderRadius: 14, position: "relative", overflow: "hidden", background: "#161D1A" }}>
           <video ref={camera.videoRef} muted playsInline style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+          {[{ top: 14, left: 14 }, { top: 14, right: 14 }, { bottom: 14, left: 14 }, { bottom: 14, right: 14 }].map((pos, i) => (
+            <span key={i} style={{
+              position: "absolute", ...pos, width: 30, height: 30, borderColor: "var(--scan-line)", borderStyle: "solid", borderWidth: 0,
+              ...(pos.top != null ? { borderTopWidth: 2 } : { borderBottomWidth: 2 }), ...(pos.left != null ? { borderLeftWidth: 2 } : { borderRightWidth: 2 }),
+            }} />
+          ))}
           <div style={{ position: "absolute", left: 0, right: 0, top: 0, height: 2, background: "var(--scan-line)", boxShadow: "0 0 14px var(--scan-line)", animation: "gg-scanline 1.8s ease-in-out infinite alternate" }} />
         </div>
-        <div style={{ font: "600 16px var(--font)", textAlign: "center" }}>Сектордың QR белгісіне бағыттаңыз</div>
+        <div style={{ font: "500 22px/1.25 var(--font-display)", textAlign: "center" }}>Қатардағы QR белгіге бағыттаңыз</div>
         <div className="subtle" style={{ color: "rgba(255,255,255,.55)", textAlign: "center", maxWidth: 250 }}>
-          Қалғаны: {sectors.length - scannedIds.length} сектор. Реті маңызды емес — жүйе белгі арқылы таниды.
+          Қалғаны: {sectors.length - scannedIds.length} сектор. Реті маңызды емес — жүйе белгі арқылы өзі таниды.
         </div>
       </div>
       <div style={{ padding: "18px 20px 30px", display: "flex", flexDirection: "column", gap: 10 }}>
         {photoError && (
           <div style={{ font: "500 12.5px var(--font)", color: "var(--rec)", textAlign: "center" }}>{photoError}</div>
         )}
-        <button className="btn btn-on-dark" onClick={pickNextUnscannedDemo}>Белгіні оқу (демо)</button>
-        <button className="btn btn-outline-on-dark" onClick={finishScan}>Дайын — есеп құру</button>
+        <button className="btn btn-on-dark" onClick={() => setPicking(true)}>Секторды картадан таңдау</button>
+        {scannedIds.length > 0 && <button className="btn btn-outline-on-dark" onClick={() => setStep("scan_done")}>Аяқтау — есеп құру</button>}
       </div>
+
+      {picking && (
+        <div onClick={() => setPicking(false)} style={{ position: "fixed", inset: 0, zIndex: 40, background: "rgba(12,17,15,.6)", display: "flex", alignItems: "flex-end", justifyContent: "center" }}>
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              width: "100%", maxWidth: 430, background: "var(--bg-shell)", color: "var(--ink)", borderRadius: "16px 16px 0 0",
+              padding: "18px 20px calc(env(safe-area-inset-bottom, 0px) + 22px)", display: "flex", flexDirection: "column", gap: 14,
+              animation: "zd-rise .25s both",
+            }}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div className="title-serif" style={{ fontSize: 20 }}>Қай сектор?</div>
+              <button className="icon-btn" onClick={() => setPicking(false)} aria-label="Жабу">✕</button>
+            </div>
+            <GreenhouseMap
+              rows={groupRows(sectors).map((row) => row.map((sec) => {
+                const done = scannedIds.includes(sec.id);
+                return { key: sec.id, label: sec.label, tag: done ? "ok" : "unscanned", tagLabel: done ? "түсірілді" : "таңдау", onClick: done ? undefined : () => pickSector(sec) };
+              }))}
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
+}
+
+function groupRows(sectors) {
+  const rows = [];
+  let current = null;
+  for (const s of sectors) {
+    if (s.row !== current) {
+      rows.push([]);
+      current = s.row;
+    }
+    rows[rows.length - 1].push(s);
+  }
+  return rows;
 }

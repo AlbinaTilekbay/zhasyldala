@@ -24,7 +24,7 @@ class GreenhouseSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Greenhouse
-        fields = ["id", "name", "crop", "crop_id", "rows", "cols", "row_counts", "preset_label", "sectors", "created_at"]
+        fields = ["id", "name", "crop", "crop_id", "rows", "cols", "row_counts", "preset_label", "sector_area_m2", "sectors", "created_at"]
         read_only_fields = ["id", "created_at"]
 
 

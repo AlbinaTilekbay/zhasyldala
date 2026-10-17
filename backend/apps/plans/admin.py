@@ -11,4 +11,5 @@ class TreatmentPlanItemInline(admin.TabularInline):
 @admin.register(TreatmentPlan)
 class TreatmentPlanAdmin(admin.ModelAdmin):
     list_display = ["id", "greenhouse", "week_no", "done_count", "total_count", "created_at"]
+    search_fields = ["greenhouse__name"]
     inlines = [TreatmentPlanItemInline]

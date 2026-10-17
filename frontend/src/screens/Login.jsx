@@ -37,21 +37,28 @@ export default function Login() {
 
   return (
     <AppShell>
-      <div className="screen-pad">
-        <TopBar to="/welcome" title="Кіру" />
-        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+      <form className="screen-pad" onSubmit={(e) => { e.preventDefault(); submit(); }}>
+        <TopBar to="/welcome" />
+        <div>
+          <h1 className="title-lg" style={{ margin: 0 }}>Қайта қош келдіңіз</h1>
+          <p className="subtle" style={{ marginTop: 8 }}>Тіркелген телефон нөміріңіз бен құпиясөзді енгізіңіз.</p>
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
           <label className="field">
             <div className="field-label">Телефон</div>
-            <input type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="+7 701 123 45 67" />
+            <input type="tel" inputMode="tel" autoComplete="tel" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="+7 701 123 45 67" />
           </label>
           <label className="field">
             <div className="field-label">Құпиясөз</div>
-            <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••" />
+            <input type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••" />
           </label>
         </div>
-        {error && <div style={{ color: "var(--bad)", font: "500 13px var(--font)" }}>{error}</div>}
-        <PrimaryButton onClick={submit} disabled={busy}>{busy ? "Кіруде…" : "Кіру"}</PrimaryButton>
-      </div>
+        {error && <div className="form-error">{error}</div>}
+        <PrimaryButton type="submit" disabled={busy || !phone || !password}>{busy ? "Кіруде…" : "Кіру"}</PrimaryButton>
+        <button type="button" className="btn-link" style={{ alignSelf: "center" }} onClick={() => navigate("/role")}>
+          Аккаунтым жоқ — тіркелу
+        </button>
+      </form>
     </AppShell>
   );
 }

@@ -2,32 +2,24 @@ import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { api } from "../api/client";
 import AppShell from "../components/AppShell";
+import ShareReport from "../components/ShareReport";
 import BottomTabBar from "../components/BottomTabBar";
 import { TopBar } from "../components/TopBar";
-import { PrimaryButton } from "../components/ui";
-
-const TAG_STYLE = {
-  ok: { bg: "var(--accent-tint-strong)", bd: "rgba(15,118,110,.22)", fg: "var(--accent)", tag: "қалыпты" },
-  warn: { bg: "var(--warn-tint-strong)", bd: "rgba(176,122,18,.28)", fg: "var(--warn-ink)", tag: "қауіп" },
-  bad: { bg: "#F7DED7", bd: "rgba(180,64,46,.3)", fg: "var(--bad-ink)", tag: "ауру" },
-  unscanned: { bg: "var(--unscanned-tint)", bd: "rgba(20,32,30,.08)", fg: "var(--unscanned-ink)", tag: "түсірілмеген" },
-};
-
-const LEGEND = [
-  { tag: "ok", label: "қалыпты", color: "#CDE6E1" },
-  { tag: "warn", label: "қауіп", color: "#F2DFB4" },
-  { tag: "bad", label: "ауру", color: "#F0C8BE" },
-  { tag: "unscanned", label: "түсірілмеген", color: "#E7E9E8" },
-];
+import {
+  ArrowIcon, GreenhouseMap, MapLegend, PrimaryButton, SectionHead, SeverityBadge, Spinner, StatusRuler, formatKkDate,
+} from "../components/ui";
 
 export default function Report() {
   const { sessionId } = useParams();
   const navigate = useNavigate();
   const [report, setReport] = useState(null);
+  const [session, setSession] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
 
   useEffect(() => {
-    api.get(`/api/scan-sessions/${sessionId}/report/`).then(setReport);
+    api.get(`/api/scan-sessions/${sessionId}/report/`).then(setReport).catch(() => setError("Есеп жүктелмеді."));
+    api.get(`/api/scan-sessions/${sessionId}/`).then(setSession).catch(() => {});
   }, [sessionId]);
 
   async function generatePlan() {
@@ -35,67 +27,83 @@ export default function Report() {
     try {
       await api.post("/api/plans/generate/", { scan_session: Number(sessionId) });
       navigate(`/app/plan/${sessionId}`);
+    } catch (err) {
+      setError(err?.message || "Жоспар құрылмады.");
     } finally {
       setBusy(false);
     }
   }
 
-  if (!report) return <AppShell tabs={<BottomTabBar />}><div className="screen-pad-tight">Жүктелуде…</div></AppShell>;
+  if (!report) {
+    return (
+      <AppShell tabs={<BottomTabBar />}>
+        <div className="screen-pad-tight">
+          <TopBar to="/app" title="Жылыжай есебі" />
+          {error ? <div className="form-error">{error}</div> : <div style={{ display: "flex", justifyContent: "center", paddingTop: 80 }}><Spinner /></div>}
+        </div>
+      </AppShell>
+    );
+  }
 
-  const hasFindings = report.counts.warn > 0 || report.counts.bad > 0;
+  const openSector = (id) => navigate(`/app/report/${sessionId}/sector/${id}`);
+  const cells = report.rows.flat();
+  const findings = cells.filter((c) => c.tag === "bad" || c.tag === "warn").sort((a, b) => (a.tag === "bad" ? -1 : 1) - (b.tag === "bad" ? -1 : 1));
+  const mapRows = report.rows.map((row) => row.map((c) => ({ key: c.sector_id, label: c.label, tag: c.tag, onClick: () => openSector(c.sector_id) })));
 
   return (
     <AppShell tabs={<BottomTabBar />}>
       <div className="screen-pad-tight">
-        <TopBar to="/app" title="Жылыжай есебі" subtitle={new Date().toLocaleDateString("kk-KZ")} />
-        <div style={{ display: "flex", gap: 8 }}>
-          <StatBox value={report.counts.ok} label="қалыпты" bg="var(--accent-tint)" fg="var(--accent)" />
-          <StatBox value={report.counts.warn} label="қауіп" bg="var(--warn-tint)" fg="var(--warn-ink)" />
-          <StatBox value={report.counts.bad} label="ауру" bg="var(--bad-tint)" fg="var(--bad-ink)" />
+        <TopBar to="/app" subtitle={session ? `Шолу · ${formatKkDate(session.started_at, { withYear: true })}` : "Шолу"} title="Жылыжай есебі" />
+
+        <div className="rise">
+          <div className="title-lg">
+            {report.scanned_count}<span style={{ color: "var(--ink-faint)" }}>/{report.total_sectors}</span> сектор тексерілді
+          </div>
         </div>
-        <div className="sector-grid">
-          {report.rows.map((row, i) => (
-            <div className="sector-row" key={i}>
-              {row.map((cell) => {
-                const style = TAG_STYLE[cell.tag];
-                return (
-                  <button
-                    key={cell.sector_id}
-                    className="sector-cell"
-                    style={{ background: style.bg, borderColor: style.bd, color: style.fg }}
-                    onClick={() => navigate(`/app/report/${sessionId}/sector/${cell.sector_id}`)}
-                  >
-                    <div className="label">{cell.label}</div>
-                    <div className="tag">{style.tag}</div>
-                  </button>
-                );
-              })}
+        <StatusRuler counts={report.counts} />
+
+        <SectionHead no={1} title="Жылыжай картасы" aside="секторды басыңыз" />
+        <GreenhouseMap rows={mapRows} />
+        <MapLegend tags={["ok", "warn", "bad", "unknown", "unscanned"].filter((t) => report.counts[t])} />
+
+        {findings.length > 0 && (
+          <>
+            <SectionHead no={2} title="Назар аударыңыз" aside={findings.length} />
+            <div className="ledger">
+              {findings.map((c) => (
+                <button key={c.sector_id} className="ledger-row" style={{ cursor: "pointer" }} onClick={() => openSector(c.sector_id)}>
+                  <span className="mono" style={{ width: 34, fontWeight: 600, fontSize: 14 }}>{c.label}</span>
+                  <span style={{ flex: 1, minWidth: 0 }}>
+                    <span style={{ display: "block", font: "600 14px var(--font)" }}>{c.diagnosis_disease || (c.tag === "bad" ? "Ауру белгісі" : "Қауіп белгісі")}</span>
+                    <span style={{ display: "block", font: "400 12px var(--font)", color: "var(--ink-mute)", marginTop: 2 }}>
+                      {c.plants} түп{c.confidence ? ` · сенімділік ${Math.round(c.confidence * 100)}%` : ""}
+                    </span>
+                  </span>
+                  <SeverityBadge severity={c.tag} />
+                  <ArrowIcon className="ledger-go" />
+                </button>
+              ))}
             </div>
-          ))}
-        </div>
-        <div style={{ display: "flex", gap: 14, flexWrap: "wrap", font: "500 11.5px var(--font)", color: "var(--ink-mute)" }}>
-          {LEGEND.map((l) => (
-            <div key={l.tag} style={{ display: "flex", gap: 6, alignItems: "center" }}>
-              <span style={{ width: 9, height: 9, borderRadius: 3, background: l.color }} />
-              {l.label}
-            </div>
-          ))}
-        </div>
-        {hasFindings && (
-          <PrimaryButton onClick={generatePlan} disabled={busy}>
-            {busy ? "Құрылуда…" : "Емдеу жоспарын құру"}
-          </PrimaryButton>
+            {error && <div className="form-error">{error}</div>}
+            <PrimaryButton onClick={generatePlan} disabled={busy}>{busy ? "Құрылуда…" : "Емдеу жоспарын құру"}</PrimaryButton>
+          </>
         )}
+        {report.counts.unknown > 0 && (
+          <div className="note" style={{ borderColor: "var(--ink-faint)" }}>
+            {report.counts.unknown} сектордың фотолары талданбады (байланыс болмаған). Оларды келесі шолуда қайта түсіріңіз.
+          </div>
+        )}
+        {findings.length === 0 && (
+          <div className="note">
+            {report.counts.unscanned > 0
+              ? `Тексерілген секторларда ауру табылмады. Әлі ${report.counts.unscanned} сектор түсірілмеген — толық сурет үшін оларды да аралаңыз.`
+              : "Бұл шолуда ауру да, қауіп те табылмады. Келесі шолуды 7 күннен кейін жасаңыз."}
+          </div>
+        )}
+
+        <SectionHead no={findings.length > 0 ? 3 : 2} title="Агрономға жіберу" />
+        <ShareReport sessionId={sessionId} dateLabel={session ? formatKkDate(session.started_at) : ""} />
       </div>
     </AppShell>
-  );
-}
-
-function StatBox({ value, label, bg, fg }) {
-  return (
-    <div style={{ flex: 1, background: bg, borderRadius: 14, padding: "11px 12px" }}>
-      <div style={{ font: "800 19px var(--font)", color: fg }}>{value}</div>
-      <div style={{ font: "500 11px var(--font)", color: "var(--ink-mute)" }}>{label}</div>
-    </div>
   );
 }

@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { api } from "../../api/client";
 import AppShell from "../../components/AppShell";
 import { TopBar } from "../../components/TopBar";
-import { PrimaryButton } from "../../components/ui";
+import { GreenhouseMap, PrimaryButton, SectionHead, StepBar } from "../../components/ui";
 import { useSetupStore } from "../../store/useSetupStore";
 
 const ROW_LETTERS = "ABCDEFGHIJ";
@@ -111,29 +111,28 @@ export default function GridSetup() {
   return (
     <AppShell>
       <div className="screen-pad">
-        <TopBar to="/setup/crop" subtitle="3-қадам / 3" title="" />
+        <TopBar to="/setup/crop" />
+        <StepBar step={3} />
         <div>
-          <div className="title-lg">Жылыжайды бөлу</div>
+          <h1 className="title-lg" style={{ margin: 0 }}>Жылыжайды бөлу</h1>
           <p className="subtle" style={{ marginTop: 8 }}>
             Жылыжайды секторға бөліңіз — қатар мен жүйек сияқты. Бір сектор = шолу кезіндегі бір фото топтамасы.
           </p>
         </div>
 
-        <div style={{ display: "flex", gap: 10 }}>
-          <button
-            onClick={() => setMode("preset")}
-            className={mode === "preset" ? "chip chip-active" : "chip chip-idle"}
-            style={{ flex: 1, padding: "10px 0", borderRadius: 12, textAlign: "center" }}
-          >
-            Дайын үлгілер
-          </button>
-          <button
-            onClick={() => setMode("custom")}
-            className={mode === "custom" ? "chip chip-active" : "chip chip-idle"}
-            style={{ flex: 1, padding: "10px 0", borderRadius: 12, textAlign: "center" }}
-          >
-            Өзім жазамын
-          </button>
+        <div style={{ display: "flex", padding: 3, gap: 3, border: "1px solid var(--ink-hairline)", borderRadius: "var(--radius-md)", background: "var(--bg-card)" }}>
+          {[["preset", "Дайын үлгілер"], ["custom", "Өзім жазамын"]].map(([key, label]) => (
+            <button
+              key={key}
+              onClick={() => setMode(key)}
+              style={{
+                flex: 1, padding: "10px 0", border: 0, borderRadius: 7, font: "600 13px var(--font)",
+                background: mode === key ? "var(--ink)" : "transparent", color: mode === key ? "#fff" : "var(--ink-soft)", transition: "background .15s",
+              }}
+            >
+              {label}
+            </button>
+          ))}
         </div>
 
         {mode === "preset" ? (
@@ -143,10 +142,10 @@ export default function GridSetup() {
                 key={p.label}
                 onClick={() => setPresetLabel(p.label)}
                 className={p.label === presetLabel ? "chip chip-active" : "chip chip-idle"}
-                style={{ flex: 1, padding: "14px 0", borderRadius: 14, textAlign: "center" }}
+                style={{ flex: 1, padding: "14px 0", borderRadius: "var(--radius-md)", textAlign: "center" }}
               >
-                <div style={{ font: "700 15px var(--font)" }}>{p.label}</div>
-                <div style={{ font: "500 11px var(--font)", opacity: 0.7, marginTop: 3 }}>{p.sub}</div>
+                <div style={{ font: "600 17px var(--mono)" }}>{p.label}</div>
+                <div style={{ font: "500 11px var(--font)", opacity: 0.7, marginTop: 4 }}>{p.sub}</div>
               </button>
             ))}
           </div>
@@ -157,7 +156,7 @@ export default function GridSetup() {
             </div>
             {customRows.map((count, i) => (
               <div key={i} style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                <div style={{ width: 20, font: "700 13px var(--font)", color: "var(--ink-mute)" }}>{ROW_LETTERS[i]}</div>
+                <div style={{ width: 20, font: "600 13px var(--mono)", color: "var(--ink-mute)" }}>{ROW_LETTERS[i]}</div>
                 <label className="field" style={{ flex: 1, padding: "8px 14px" }}>
                   <div className="field-label">{i + 1}-қатар — сектор саны</div>
                   <input
@@ -183,34 +182,20 @@ export default function GridSetup() {
             <button className="btn btn-ghost" onClick={addCustomRow} disabled={customRows.length >= MAX_ROWS}>
               + Қатар қосу
             </button>
-            <div className="subtle">Барлығы: {customTotal} сектор ({customRows.length} қатар)</div>
+            <div className="mono" style={{ fontSize: 12, color: "var(--ink-mute)" }}>Барлығы: {customTotal} сектор · {customRows.length} қатар</div>
           </div>
         )}
 
         {previewRowCounts.length > 0 && (
-          <div className="card card-lg" style={{ display: "flex", flexDirection: "column", gap: 9 }}>
-            <div style={{ font: "600 12px var(--font)", color: "var(--ink-faint)" }}>Карта нобайы</div>
-            <div className="sector-grid">
-              {previewRows(previewRowCounts).map((row) => (
-                <div className="sector-row" key={row.join()}>
-                  {row.map((label) => (
-                    <div
-                      key={label}
-                      style={{
-                        flex: 1, aspectRatio: 1, borderRadius: 11, background: "var(--unscanned-tint)",
-                        border: "1px solid var(--ink-hairline)", display: "flex", alignItems: "center",
-                        justifyContent: "center", font: "600 12px var(--font)", color: "var(--ink-mute)",
-                      }}
-                    >
-                      {label}
-                    </div>
-                  ))}
-                </div>
-              ))}
-            </div>
-          </div>
+          <>
+            <SectionHead title="Карта нобайы" aside={`${previewRowCounts.reduce((x, y) => x + y, 0)} сектор`} />
+            <GreenhouseMap
+              compact
+              rows={previewRows(previewRowCounts).map((row) => row.map((label) => ({ key: label, label, tag: "unscanned" })))}
+            />
+          </>
         )}
-        {error && <div style={{ color: "var(--bad)", font: "500 13px var(--font)" }}>{error}</div>}
+        {error && <div className="form-error">{error}</div>}
         <PrimaryButton onClick={next} disabled={busy}>{busy ? "Жасалуда…" : "QR белгілерін жасау"}</PrimaryButton>
       </div>
     </AppShell>

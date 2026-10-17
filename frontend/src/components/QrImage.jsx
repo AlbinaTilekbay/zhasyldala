@@ -24,11 +24,11 @@ export default function QrImage({ sectorId, size = 64 }) {
   return (
     <div
       style={{
-        width: "100%", aspectRatio: 1, borderRadius: 7, background: "#14201E",
+        width: "100%", aspectRatio: 1, borderRadius: 4, background: url ? "#fff" : "var(--unscanned-tint)",
         display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden",
       }}
     >
-      {url && <img src={url} alt="QR" width={size} height={size} style={{ background: "#fff" }} />}
+      {url && <img src={url} alt="QR" style={{ width: "100%", height: "100%", display: "block", imageRendering: "pixelated" }} />}
     </div>
   );
 }

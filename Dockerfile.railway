@@ -23,7 +23,7 @@ WORKDIR /app
 # libgl1/libglib for opencv-python-headless (video-frame sampling);
 # libpq-dev/gcc only needed if psycopg2 has to build from source.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    libgl1 libglib2.0-0 libpq-dev gcc \
+    libgl1 libglib2.0-0 libpq-dev gcc fonts-dejavu-core \
     && rm -rf /var/lib/apt/lists/*
 
 COPY backend/requirements.txt backend/requirements-ml.txt ./
@@ -46,4 +46,5 @@ EXPOSE 8000
 # fallback for `docker run` / other hosts that don't set it.
 CMD sh -c "python manage.py migrate --noinput && \
            python manage.py seed_data && \
+           python manage.py ensure_superuser && \
            gunicorn config.wsgi:application --bind 0.0.0.0:${PORT:-8000} --workers 3"

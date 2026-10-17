@@ -46,6 +46,9 @@ class Greenhouse(models.Model):
     # this field existed and never regenerated.
     row_counts = models.JSONField(default=list, blank=True)
     preset_label = models.CharField(max_length=40, default="3×4")
+    # One sector's floor area — only used by the treatment plan's dose
+    # calculator (litres of solution / grams of product per sector).
+    sector_area_m2 = models.FloatField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
