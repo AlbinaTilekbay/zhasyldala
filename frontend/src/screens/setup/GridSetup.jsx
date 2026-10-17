@@ -6,7 +6,7 @@ import { TopBar } from "../../components/TopBar";
 import { PrimaryButton } from "../../components/ui";
 import { useSetupStore } from "../../store/useSetupStore";
 
-const ROW_LETTERS = "ABCDE";
+const ROW_LETTERS = "ABCDEFGHIJ";
 const MAX_ROWS = ROW_LETTERS.length;
 // Kept as strings, not numbers — an <input> bound to a clamped number
 // used to force the field back to "1" on every keystroke the instant it

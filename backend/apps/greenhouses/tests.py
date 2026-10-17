@@ -42,3 +42,9 @@ class SectorGenerationTests(TestCase):
         # Row C (index 2) only has 4 sectors — labels C1..C4, no C5/C6.
         row_c_labels = sorted(s.label for s in by_row[2])
         self.assertEqual(row_c_labels, ["C1", "C2", "C3", "C4"])
+
+    def test_six_or_more_rows_get_their_own_letters(self):
+        # Printed row labels go up to at least 6 rows — the old "ABCDE"
+        # letter set capped a greenhouse at 5.
+        sectors = self.greenhouse.generate_sectors(row_counts=[1] * 6)
+        self.assertEqual([s.label for s in sectors], ["A1", "B1", "C1", "D1", "E1", "F1"])

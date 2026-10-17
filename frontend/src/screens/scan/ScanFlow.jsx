@@ -85,6 +85,8 @@ export default function ScanFlow() {
       if (code?.data?.startsWith("zhasyldala://sector/")) {
         const token = code.data.replace("zhasyldala://sector/", "");
         handleScanned(token);
+      } else if (code?.data?.startsWith("zhasyldala://row/")) {
+        handleRowScanned(parseInt(code.data.replace("zhasyldala://row/", ""), 10));
       }
     }, 400);
     return () => clearInterval(qrTimerRef.current);
@@ -101,6 +103,31 @@ export default function ScanFlow() {
     } catch {
       // unresolved token — keep scanning
     }
+  }
+
+  // Row labels ("zhasyldala://row/3") are generic, pre-printable codes —
+  // not tied to any greenhouse or sector token — so they can be hung in a
+  // greenhouse before it's even set up in the app, and survive the grid
+  // being regenerated later. They resolve against *this* farmer's current
+  // greenhouse: row N (1-based) -> the first not-yet-scanned sector in
+  // that row, so scanning the same row label again walks along the row.
+  function handleRowScanned(rowNumber) {
+    if (!Number.isInteger(rowNumber) || rowNumber < 1) return;
+    const inRow = sectors.filter((s) => s.row === rowNumber - 1).sort((a, b) => a.col - b.col);
+    const next = inRow.find((s) => !scannedIds.includes(s.id));
+    if (!next) {
+      setPhotoError(
+        inRow.length === 0
+          ? `${rowNumber}-қатар жылыжайыңызда жоқ.`
+          : `${rowNumber}-қатардың барлық секторлары түсірілді.`
+      );
+      return;
+    }
+    clearInterval(qrTimerRef.current);
+    setPhotoError(null);
+    setCurrent(next);
+    setCapture(null);
+    setStep("scan_confirm");
   }
 
   function pickNextUnscannedDemo() {

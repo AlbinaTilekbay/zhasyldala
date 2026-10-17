@@ -3,7 +3,7 @@ import uuid
 from django.conf import settings
 from django.db import models
 
-ROW_LETTERS = "ABCDE"
+ROW_LETTERS = "ABCDEFGHIJ"
 
 #: Sector grid presets shown on the mockup's "Жылыжайды бөлу" screen.
 GRID_PRESETS = [
