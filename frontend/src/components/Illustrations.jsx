@@ -20,7 +20,7 @@ export function GreenhouseHero({ animate = true }) {
     [62, 0], [92, 1], [122, 2], [152, 3], [182, 4], [212, 5], [242, 6], [272, 7],
   ];
   return (
-    <svg viewBox="0 0 320 200" width="100%" style={{ display: "block", color: "var(--ink)" }} aria-hidden="true">
+    <svg viewBox="0 0 320 200" width="100%" height="100%" style={{ display: "block", color: "var(--ink)" }} aria-hidden="true">
       {/* ground */}
       <path d="M8 172H312" {...LINE} strokeWidth="1.2" pathLength="1" style={drawStyle(animate, 0)} />
       {/* arch */}

@@ -287,3 +287,27 @@ button.gh-cell:hover { transform: translateY(-1px); }
 .timeline-range { width: 100%; accent-color: var(--accent); margin: 0; }
 .timeline-weeks { display: flex; justify-content: space-between; font: 500 10px var(--mono); color: var(--ink-faint); margin-top: 4px; }
 .timeline-weeks span.on { color: var(--ink); font-weight: 700; }
+
+/* Welcome: fits one Safari screen (see Welcome.jsx) */
+.welcome {
+  height: 100dvh; display: flex; flex-direction: column; overflow-y: auto;
+  padding: 16px 22px calc(env(safe-area-inset-bottom, 0px) + 14px); gap: clamp(10px, 2.2dvh, 18px);
+}
+.welcome > * { flex-shrink: 0; }
+.welcome .welcome-hero { flex: 1 1 0; min-height: 70px; max-height: 200px; width: 100%; max-width: 320px; margin: 0 auto; }
+.welcome-title { font-size: clamp(27px, 4.6dvh, 34px); }
+.welcome-lead { margin-top: 10px; font-size: 15px; max-width: 330px; }
+.welcome-sub { font: 400 12.5px/1.45 var(--font); color: var(--ink-mute); margin-top: 2px; }
+.welcome .ledger-row { padding: clamp(6px, 1.1dvh, 9px) 0; }
+.welcome-cta { margin-top: auto; display: flex; flex-direction: column; gap: 4px; align-items: center; }
+@media (max-height: 740px) {
+  .welcome-sub { display: none; }
+  .welcome-lead { font-size: 14px; }
+}
+@media (max-height: 600px) {
+  .welcome-lead { display: none; }
+}
+@media (min-width: 768px) {
+  /* Inside the desktop phone frame the frame, not the window, is the screen. */
+  .welcome { height: 100%; }
+}

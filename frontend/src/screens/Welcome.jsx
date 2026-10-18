@@ -13,7 +13,10 @@ export default function Welcome() {
   const navigate = useNavigate();
   return (
     <AppShell>
-      <div style={{ minHeight: "100dvh", display: "flex", flexDirection: "column", padding: "18px 22px 22px", gap: 18 }}>
+      {/* Exactly one visible screen tall (dvh = the area Safari's toolbars
+          leave), with the illustration as the only part that shrinks — so
+          "Бастау" is always on screen without scrolling, down to iPhone SE. */}
+      <div className="welcome">
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <span style={{ font: "600 15px var(--font-display)", letterSpacing: "-0.01em" }}>
             Zhasyl<span style={{ color: "var(--accent)" }}>Dala</span>
@@ -21,15 +24,15 @@ export default function Welcome() {
           <span className="eyebrow">жылыжай дәрігері</span>
         </div>
 
-        <div style={{ margin: "0 auto", width: "100%", maxWidth: 300 }}>
+        <div className="welcome-hero">
           <GreenhouseHero />
         </div>
 
         <div className="rise" style={{ animationDelay: ".25s" }}>
-          <h1 className="title-xl" style={{ margin: 0, fontSize: 34 }}>
+          <h1 className="title-xl welcome-title" style={{ margin: 0 }}>
             Ауруды көзге көрінбей тұрып <em style={{ color: "var(--accent)", fontStyle: "italic" }}>табыңыз.</em>
           </h1>
-          <p className="subtle" style={{ marginTop: 12, fontSize: 15, maxWidth: 330 }}>
+          <p className="subtle welcome-lead">
             Жылыжайды секторларға бөліп, телефонмен аралап шығыңыз — ZhasylDala қай түпте не болып жатқанын
             айтып, емдеу жоспарын құрады.
           </p>
@@ -41,13 +44,13 @@ export default function Welcome() {
               <span className="sec-no" style={{ width: 22 }}>{String(i + 1).padStart(2, "0")}</span>
               <div>
                 <div style={{ font: "600 14px var(--font)" }}>{title}</div>
-                <div style={{ font: "400 12.5px/1.45 var(--font)", color: "var(--ink-mute)", marginTop: 2 }}>{sub}</div>
+                <div className="welcome-sub">{sub}</div>
               </div>
             </div>
           ))}
         </div>
 
-        <div style={{ marginTop: "auto", display: "flex", flexDirection: "column", gap: 8, alignItems: "center" }}>
+        <div className="welcome-cta">
           <PrimaryButton onClick={() => navigate("/role")}>Бастау</PrimaryButton>
           <button className="btn-link" onClick={() => navigate("/login")}>Тіркелгенім бар — кіру</button>
         </div>
