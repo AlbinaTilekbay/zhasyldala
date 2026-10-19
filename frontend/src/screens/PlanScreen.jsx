@@ -3,7 +3,7 @@ import { useParams } from "react-router-dom";
 import { api } from "../api/client";
 import AppShell from "../components/AppShell";
 import BottomTabBar from "../components/BottomTabBar";
-import DoseCalculator from "../components/DoseCalculator";
+import DoseCalculator, { suggestProduct } from "../components/DoseCalculator";
 import { TopBar } from "../components/TopBar";
 import { CheckBox, SectionHead, Spinner } from "../components/ui";
 
@@ -11,9 +11,14 @@ export default function PlanScreen() {
   const { sessionId } = useParams();
   const [plan, setPlan] = useState(null);
   const [error, setError] = useState(null);
+  const [suggested, setSuggested] = useState(null);
 
   useEffect(() => {
     api.post("/api/plans/generate/", { scan_session: Number(sessionId) }).then(setPlan).catch(() => setError("Жоспар жүктелмеді."));
+    // Best-effort: the calculator just keeps its default if the report fails.
+    api.get(`/api/scan-sessions/${sessionId}/report/`)
+      .then((rep) => setSuggested(suggestProduct(rep.rows.flat().filter((c) => c.tag === "bad" || c.tag === "warn").map((c) => c.diagnosis_disease))))
+      .catch(() => {});
   }, [sessionId]);
 
   async function toggle(item) {
@@ -93,7 +98,7 @@ export default function PlanScreen() {
         {affected.length > 0 && (
           <>
             <SectionHead no={2} title="Препарат мөлшері" aside="калькулятор" />
-            <DoseCalculator greenhouseId={plan.greenhouse} sectorCount={affected.length} />
+            <DoseCalculator greenhouseId={plan.greenhouse} sectorCount={affected.length} suggested={suggested} />
           </>
         )}
 

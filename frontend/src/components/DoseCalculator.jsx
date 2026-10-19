@@ -10,6 +10,24 @@ const PRODUCTS = [
   { key: "custom", name: "Басқа препарат", dose: 10, unit: "г" },
 ];
 
+// Picks the product that fits the diseases this scan found, so the farmer
+// doesn't start from Bordeaux mixture for, say, powdery mildew. Mites are
+// skipped (none of these products treat them); the most frequent remaining
+// disease wins. Returns null when nothing matches — the default stays.
+export function suggestProduct(diseaseNames) {
+  const votes = {};
+  for (const raw of diseaseNames) {
+    const name = String(raw || "").toLowerCase();
+    if (!name || name.includes("кене")) continue;
+    let key = null;
+    if (name.includes("жалған") || name.includes("пероноспороз") || name.includes("фитофтороз") || name.includes("бактерия") || name.includes("дақ")) key = "hom";
+    else if (name.includes("ақұнтақ")) key = "topaz";
+    if (key) votes[key] = (votes[key] || 0) + 1;
+  }
+  const best = Object.entries(votes).sort((a, b) => b[1] - a[1])[0];
+  return best ? best[0] : null;
+}
+
 function num(v, fallback = 0) {
   const n = parseFloat(String(v).replace(",", "."));
   return Number.isFinite(n) && n >= 0 ? n : fallback;
@@ -23,12 +41,19 @@ function fmt(n) {
 // area (m²) × spray rate (L/m²) = litres of solution; litres ÷ 10 × the
 // product's dose per 10 L = grams/ml of product. The sector area is
 // saved on the greenhouse so it only has to be typed once.
-export default function DoseCalculator({ greenhouseId, sectorCount }) {
+export default function DoseCalculator({ greenhouseId, sectorCount, suggested }) {
   const [area, setArea] = useState("");
   const [rate, setRate] = useState("0,1");
-  const [productKey, setProductKey] = useState("bordeaux");
+  const [productKey, setProductKey] = useState(suggested || "bordeaux");
+  const [picked, setPicked] = useState(false);
   const [customDose, setCustomDose] = useState("10");
   const [sectors, setSectors] = useState(String(sectorCount || 1));
+
+  // The suggestion arrives after the scan report loads; apply it unless the
+  // farmer has already chosen a product by hand.
+  useEffect(() => {
+    if (suggested && !picked) setProductKey(suggested);
+  }, [suggested, picked]);
 
   useEffect(() => {
     api.get(`/api/greenhouses/${greenhouseId}/`).then((gh) => setArea(gh.sector_area_m2 ? String(gh.sector_area_m2).replace(".", ",") : "10")).catch(() => setArea("10"));
@@ -56,7 +81,7 @@ export default function DoseCalculator({ greenhouseId, sectorCount }) {
     <div className="card" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
       <div className="chip-scroll" style={{ margin: "0 -16px", padding: "0 16px 2px" }}>
         {PRODUCTS.map((p) => (
-          <button key={p.key} className={`chip ${p.key === productKey ? "chip-active" : "chip-idle"}`} onClick={() => setProductKey(p.key)}>
+          <button key={p.key} className={`chip ${p.key === productKey ? "chip-active" : "chip-idle"}`} onClick={() => { setPicked(true); setProductKey(p.key); }}>
             {p.name}
           </button>
         ))}
