@@ -11,13 +11,16 @@ const PRODUCTS = [
 ];
 
 // Picks the product that fits the diseases this scan found, so the farmer
-// doesn't start from Bordeaux mixture for, say, powdery mildew. Mites are
-// skipped (none of these products treat them); the most frequent remaining
-// disease wins. Returns null when nothing matches — the default stays.
+// doesn't start from Bordeaux mixture for, say, powdery mildew. The most
+// frequent fungal disease wins. Mites are not treated by any preset (they
+// need an acaricide), so a mites-only scan opens "Басқа препарат" for the
+// farmer to type the label dose. Returns null when nothing matches.
 export function suggestProduct(diseaseNames) {
   const votes = {};
+  let mites = false;
   for (const raw of diseaseNames) {
     const name = String(raw || "").toLowerCase();
+    if (name.includes("кене")) mites = true;
     if (!name || name.includes("кене")) continue;
     let key = null;
     if (name.includes("жалған") || name.includes("пероноспороз") || name.includes("фитофтороз") || name.includes("бактерия") || name.includes("дақ")) key = "hom";
@@ -25,7 +28,8 @@ export function suggestProduct(diseaseNames) {
     if (key) votes[key] = (votes[key] || 0) + 1;
   }
   const best = Object.entries(votes).sort((a, b) => b[1] - a[1])[0];
-  return best ? best[0] : null;
+  if (best) return best[0];
+  return mites ? "custom" : null;
 }
 
 function num(v, fallback = 0) {
