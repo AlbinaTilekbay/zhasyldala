@@ -1,14 +1,19 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "../api/client";
 
-// Common label rates per 10 L of water. Shown as a starting point only —
-// the farmer is told to check the package (formulations differ).
+// Label rates exactly as packages print them: this much product in this
+// much water covers this many m². The farmer copies the three numbers off
+// the package instead of converting them to L/m² in their head (labels mix
+// "per 100 m²", "per 10 m²" and "per sotka", and the old single "Шығын,
+// л/м²" field made them do that arithmetic). Values are a starting point;
+// every field stays editable because formulations differ between makers.
 const PRODUCTS = [
-  { key: "bordeaux", name: "Бордо сұйықтығы 1%", dose: 100, unit: "г" },
-  { key: "hom", name: "Мыс хлороқышы (ХОМ)", dose: 40, unit: "г" },
-  { key: "topaz", name: "Топаз (ақұнтаққа)", dose: 2, unit: "мл" },
-  { key: "custom", name: "Басқа препарат", dose: 10, unit: "г" },
+  { key: "bordeaux", name: "Бордо сұйықтығы 1%", dose: 100, unit: "г", water: 10, cover: 100 },
+  { key: "hom", name: "Мыс хлороқышы (ХОМ)", dose: 40, unit: "г", water: 10, cover: 100 },
+  { key: "topaz", name: "Топаз (ақұнтаққа)", dose: 2, unit: "мл", water: 10, cover: 100 },
+  { key: "custom", name: "Басқа препарат", dose: 10, unit: "г", water: 10, cover: 100 },
 ];
+const str = (n) => String(n).replace(".", ",");
 
 // Picks the product that fits the diseases this scan found, so the farmer
 // doesn't start from Bordeaux mixture for, say, powdery mildew. The most
@@ -46,16 +51,20 @@ function fmt(n) {
   return (Math.round(n * f) / f).toString().replace(".", ",");
 }
 
-// How much solution and product to mix for the plan's affected sectors:
-// area (m²) × spray rate (L/m²) = litres of solution; litres ÷ 10 × the
-// product's dose per 10 L = grams/ml of product. The sector area is
-// saved on the greenhouse so it only has to be typed once.
+// How much solution and product to mix for the plan's affected sectors.
+// Plain proportion from the label: if `dose` of product in `water` litres
+// covers `cover` m², then area m² needs area ÷ cover of each. The sector
+// area is saved on the greenhouse so it only has to be typed once.
 export default function DoseCalculator({ greenhouseId, sectorCount, suggested }) {
   const [area, setArea] = useState("");
-  const [rate, setRate] = useState("0,1");
   const [productKey, setProductKey] = useState(suggested || "bordeaux");
   const [picked, setPicked] = useState(false);
-  const [customDose, setCustomDose] = useState("10");
+  // The three label numbers, refilled from the preset whenever the product
+  // changes, then free to edit.
+  const [dose, setDose] = useState("");
+  const [unit, setUnit] = useState("г");
+  const [water, setWater] = useState("");
+  const [cover, setCover] = useState("");
   const [sectors, setSectors] = useState(String(sectorCount || 1));
 
   // The suggestion arrives after the scan report loads; apply it unless the
@@ -63,6 +72,11 @@ export default function DoseCalculator({ greenhouseId, sectorCount, suggested })
   useEffect(() => {
     if (suggested && !picked) setProductKey(suggested);
   }, [suggested, picked]);
+
+  useEffect(() => {
+    const p = PRODUCTS.find((x) => x.key === productKey) || PRODUCTS[0];
+    setDose(str(p.dose)); setUnit(p.unit); setWater(str(p.water)); setCover(str(p.cover));
+  }, [productKey]);
 
   // An auto-picked product (Topaz, "Басқа препарат") sits past the right
   // edge of the chip row on a phone, so the farmer couldn't see which one
@@ -99,10 +113,10 @@ export default function DoseCalculator({ greenhouseId, sectorCount, suggested })
   }
 
   const product = PRODUCTS.find((p) => p.key === productKey);
-  const dose = productKey === "custom" ? num(customDose) : product.dose;
   const totalArea = num(area) * num(sectors);
-  const litres = totalArea * num(rate);
-  const amount = (litres / 10) * dose;
+  const share = num(cover) > 0 ? totalArea / num(cover) : 0;
+  const litres = share * num(water);
+  const amount = share * num(dose);
 
   const field = (label, value, set, extra = {}) => (
     <label className="field" style={{ flex: 1, minWidth: 0, padding: "9px 12px 8px" }}>
@@ -124,16 +138,25 @@ export default function DoseCalculator({ greenhouseId, sectorCount, suggested })
         {field("Сектор ауданы, м²", area, setArea, { onBlur: saveArea })}
         {field("Сектор саны", sectors, setSectors, { inputMode: "numeric" })}
       </div>
+      <div className="eyebrow" style={{ marginBottom: -4 }}>Қаптамада жазылғандай</div>
       <div style={{ display: "flex", gap: 8 }}>
-        {field("Шығын, л/м²", rate, setRate)}
-        {productKey === "custom"
-          ? field("Мөлшер / 10 л", customDose, setCustomDose)
-          : (
-            <div className="field" style={{ flex: 1, padding: "9px 12px 8px", background: "transparent" }}>
-              <div className="field-label">Мөлшер / 10 л</div>
-              <div className="field-value">{product.dose} {product.unit}</div>
-            </div>
-          )}
+        <label className="field" style={{ flex: 1.15, minWidth: 0, padding: "9px 12px 8px" }}>
+          <div className="field-label">Препарат</div>
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <input inputMode="decimal" value={dose} onChange={(e) => setDose(e.target.value)} style={{ minWidth: 0, flex: 1 }} />
+            <button
+              type="button"
+              className="chip chip-idle"
+              onClick={() => setUnit((u) => (u === "г" ? "мл" : "г"))}
+              aria-label="Өлшем бірлігін ауыстыру"
+              style={{ padding: "4px 10px", fontSize: 13 }}
+            >
+              {unit}
+            </button>
+          </div>
+        </label>
+        {field("Су, л", water, setWater)}
+        {field("Жетеді, м²", cover, setCover)}
       </div>
       {areaNote && <div className="form-error">{areaNote}</div>}
       <div className="eyebrow" style={{ borderTop: "1px solid var(--ink-hairline)", paddingTop: 12 }}>
@@ -146,7 +169,7 @@ export default function DoseCalculator({ greenhouseId, sectorCount, suggested })
         </div>
         <div style={{ borderLeft: "1px solid var(--ink-hairline)", paddingLeft: 14 }}>
           <div className="eyebrow">Препарат</div>
-          <div style={{ font: "600 26px/1.1 var(--mono)", color: "var(--ink)", marginTop: 4 }}>{fmt(amount)} <small style={{ fontSize: 13 }}>{product.unit}</small></div>
+          <div style={{ font: "600 26px/1.1 var(--mono)", color: "var(--ink)", marginTop: 4 }}>{fmt(amount)} <small style={{ fontSize: 13 }}>{unit}</small></div>
         </div>
       </div>
       <div style={{ font: "400 11.5px/1.5 var(--font)", color: "var(--ink-mute)" }}>
