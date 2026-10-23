@@ -47,6 +47,13 @@ export default function PlanScreen() {
   const doneCount = plan.items.filter((i) => i.done).length;
   const total = plan.items.length;
   const affected = [...new Set(plan.items.flatMap((i) => i.sector_labels))];
+  // The dose calculator needs only the sectors that actually get sprayed,
+  // not every sector the plan touches — a "watch" sector that's only
+  // re-watered (e.g. D6 in week 1) would otherwise inflate the dose.
+  // Spray steps are the ones titled "…өңдеу" (both generated and hand-
+  // written plans use the word); with none, fall back to all sectors.
+  const sprayed = [...new Set(plan.items.filter((i) => /өңдеу/i.test(i.title)).flatMap((i) => i.sector_labels))];
+  const doseSectors = sprayed.length ? sprayed : affected;
   const allDone = total > 0 && doneCount === total;
 
   return (
@@ -98,7 +105,7 @@ export default function PlanScreen() {
         {affected.length > 0 && (
           <>
             <SectionHead no={2} title="Препарат мөлшері" aside="калькулятор" />
-            <DoseCalculator greenhouseId={plan.greenhouse} sectorCount={affected.length} suggested={suggested} />
+            <DoseCalculator greenhouseId={plan.greenhouse} sectorCount={doseSectors.length} suggested={suggested} />
           </>
         )}
 

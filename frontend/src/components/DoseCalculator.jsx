@@ -37,8 +37,13 @@ function num(v, fallback = 0) {
   return Number.isFinite(n) && n >= 0 ? n : fallback;
 }
 
+// Small doses need their decimals: 14,4 g of ХОМ or 0,96 ml of Topaz is
+// what actually goes in the sprayer, and rounding them to "14" / "1"
+// overstated or blurred the amount. Only 100+ is shown as a whole number.
 function fmt(n) {
-  return n >= 10 ? Math.round(n).toString() : (Math.round(n * 10) / 10).toString().replace(".", ",");
+  const digits = n >= 100 ? 0 : n >= 1 ? 1 : 2;
+  const f = 10 ** digits;
+  return (Math.round(n * f) / f).toString().replace(".", ",");
 }
 
 // How much solution and product to mix for the plan's affected sectors:
@@ -59,13 +64,27 @@ export default function DoseCalculator({ greenhouseId, sectorCount, suggested })
     if (suggested && !picked) setProductKey(suggested);
   }, [suggested, picked]);
 
+  // The sector area normally comes from setup (greenhouse area ÷ sectors).
+  // When it's missing we leave the field empty and say so, instead of the
+  // old silent 10 m² guess — a made-up area gave a confident-looking but
+  // wrong dose.
+  const [areaNote, setAreaNote] = useState(null);
   useEffect(() => {
-    api.get(`/api/greenhouses/${greenhouseId}/`).then((gh) => setArea(gh.sector_area_m2 ? String(gh.sector_area_m2).replace(".", ",") : "10")).catch(() => setArea("10"));
+    api.get(`/api/greenhouses/${greenhouseId}/`)
+      .then((gh) => {
+        if (gh.sector_area_m2) setArea(String(gh.sector_area_m2).replace(".", ","));
+        else setAreaNote("Бір сектордың ауданын жазыңыз — норма содан кейін есептеледі.");
+      })
+      .catch(() => setAreaNote("Сектор ауданы жүктелмеді — қолмен жазыңыз."));
   }, [greenhouseId]);
 
   function saveArea() {
     const value = num(area, 0);
-    if (value > 0) api.patch(`/api/greenhouses/${greenhouseId}/`, { sector_area_m2: value }).catch(() => {});
+    if (value > 0) {
+      setAreaNote(null);
+      api.patch(`/api/greenhouses/${greenhouseId}/`, { sector_area_m2: value })
+        .catch(() => setAreaNote("Аудан сақталмады — келесі жолы қайта жазу керек болуы мүмкін."));
+    }
   }
 
   const product = PRODUCTS.find((p) => p.key === productKey);
@@ -105,7 +124,11 @@ export default function DoseCalculator({ greenhouseId, sectorCount, suggested })
             </div>
           )}
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", borderTop: "1px solid var(--ink-hairline)", paddingTop: 12 }}>
+      {areaNote && <div className="form-error">{areaNote}</div>}
+      <div className="eyebrow" style={{ borderTop: "1px solid var(--ink-hairline)", paddingTop: 12 }}>
+        Ұсынылатын норма · {product.name}
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", marginTop: -6 }}>
         <div>
           <div className="eyebrow">Ерітінді</div>
           <div style={{ font: "600 26px/1.1 var(--mono)", color: "var(--accent)", marginTop: 4 }}>{fmt(litres)} <small style={{ fontSize: 13 }}>л</small></div>

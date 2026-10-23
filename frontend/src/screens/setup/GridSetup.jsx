@@ -20,6 +20,12 @@ function clampRowCount(raw) {
   return Math.max(1, Math.min(30, parseInt(raw, 10) || 1));
 }
 
+// Farmers type "720" or "72,5" — accept a comma decimal too. 0 = not given.
+function parseArea(raw) {
+  const n = parseFloat(String(raw).replace(",", "."));
+  return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
 function previewRows(rowCounts) {
   return rowCounts.map((count, i) => {
     const cells = [];
@@ -41,6 +47,12 @@ export default function GridSetup() {
   const [presets, setPresets] = useState([]);
   const [mode, setMode] = useState("preset"); // preset | custom
   const [customRows, setCustomRows] = useState(DEFAULT_CUSTOM_ROWS);
+  // Whole-greenhouse floor area. Farmers know this number (it's how a
+  // greenhouse is built and sold), not the area of one sector — so we ask
+  // for the total here and divide by the sector count ourselves. The
+  // result feeds the treatment plan's dose calculator, which otherwise
+  // had to fall back to a guessed 10 m² per sector.
+  const [area, setArea] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
 
@@ -66,6 +78,9 @@ export default function GridSetup() {
   const customCounts = customRows.map(clampRowCount);
   const previewRowCounts = mode === "custom" ? customCounts : selected ? Array(selected.rows).fill(selected.cols) : [];
   const customTotal = customCounts.reduce((a, b) => a + b, 0);
+  const sectorTotal = previewRowCounts.reduce((a, b) => a + b, 0);
+  const totalArea = parseArea(area);
+  const sectorArea = totalArea && sectorTotal ? Math.round((totalArea / sectorTotal) * 10) / 10 : 0;
 
   function updateCustomRow(i, value) {
     // Accept empty / any digits while typing — don't clamp here, or
@@ -94,6 +109,12 @@ export default function GridSetup() {
     try {
       const body = mode === "custom" ? { row_counts: customCounts } : { preset_label: presetLabel };
       await api.post(`/api/greenhouses/${greenhouseId}/sectors/generate/`, body);
+      // Optional: a farmer who doesn't know the area can skip it and type
+      // a sector area later in the plan's calculator. Saved after the grid
+      // so the per-sector split uses the grid that was actually created.
+      if (sectorArea > 0) {
+        await api.patch(`/api/greenhouses/${greenhouseId}/`, { sector_area_m2: sectorArea });
+      }
       navigate("/setup/qr");
     } catch (err) {
       // Without this, a failed request left the button looking like it
@@ -195,6 +216,17 @@ export default function GridSetup() {
             />
           </>
         )}
+        <label className="field">
+          <div className="field-label">Жылыжайдың ауданы, м²</div>
+          <input inputMode="decimal" placeholder="мысалы, 720" value={area} onChange={(e) => setArea(e.target.value)} />
+        </label>
+        <p className="subtle" style={{ marginTop: -8 }}>
+          {sectorArea > 0 ? (
+            <>1 сектор ≈ <span className="mono">{String(sectorArea).replace(".", ",")} м²</span>. Емдеу жоспарында дәрінің нормасы осы бойынша өзі есептеледі.</>
+          ) : (
+            "Білсеңіз жазыңыз: сайт дәрінің нормасын өзі есептейді. Білмесеңіз, кейін емдеу жоспарында енгізуге болады."
+          )}
+        </p>
         {error && <div className="form-error">{error}</div>}
         <PrimaryButton onClick={next} disabled={busy}>{busy ? "Жасалуда…" : "QR белгілерін жасау"}</PrimaryButton>
       </div>
