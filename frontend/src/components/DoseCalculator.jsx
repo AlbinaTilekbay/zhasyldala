@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api } from "../api/client";
 
 // Common label rates per 10 L of water. Shown as a starting point only —
@@ -64,6 +64,17 @@ export default function DoseCalculator({ greenhouseId, sectorCount, suggested })
     if (suggested && !picked) setProductKey(suggested);
   }, [suggested, picked]);
 
+  // An auto-picked product (Topaz, "Басқа препарат") sits past the right
+  // edge of the chip row on a phone, so the farmer couldn't see which one
+  // the norm was computed for. Scroll the row — only the row, not the page
+  // (scrollIntoView would also jump the page) — to the active chip.
+  const chipsRef = useRef(null);
+  useEffect(() => {
+    const row = chipsRef.current;
+    const chip = row?.querySelector(".chip-active");
+    if (row && chip) row.scrollTo({ left: Math.max(0, chip.offsetLeft - 16), behavior: "smooth" });
+  }, [productKey]);
+
   // The sector area normally comes from setup (greenhouse area ÷ sectors).
   // When it's missing we leave the field empty and say so, instead of the
   // old silent 10 m² guess — a made-up area gave a confident-looking but
@@ -102,7 +113,7 @@ export default function DoseCalculator({ greenhouseId, sectorCount, suggested })
 
   return (
     <div className="card" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-      <div className="chip-scroll" style={{ margin: "0 -16px", padding: "0 16px 2px" }}>
+      <div className="chip-scroll" ref={chipsRef} style={{ margin: "0 -16px", padding: "0 16px 2px" }}>
         {PRODUCTS.map((p) => (
           <button key={p.key} className={`chip ${p.key === productKey ? "chip-active" : "chip-idle"}`} onClick={() => { setPicked(true); setProductKey(p.key); }}>
             {p.name}
