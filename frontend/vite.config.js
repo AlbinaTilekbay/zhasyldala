@@ -13,6 +13,14 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: "autoUpdate",
+      // The slide deck in public/deck/ is a separate static page, not part
+      // of the app: keep it out of the precache (its videos are large) and
+      // don't let the service worker answer /deck with the SPA's index.html,
+      // or anyone who has opened the app before would land in the app.
+      workbox: {
+        globIgnores: ["deck/**"],
+        navigateFallbackDenylist: [/^\/deck/, /^\/api\//, /^\/media\//, /^\/django-admin\//],
+      },
       manifest: {
         name: "ZhasylDala",
         short_name: "ZhasylDala",

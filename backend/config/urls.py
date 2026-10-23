@@ -70,6 +70,18 @@ def frontend_index(request, *args, **kwargs):
 
 
 # Must stay last: matches anything not already routed above.
+def deck_index(request, *args, **kwargs):
+    """The defence slide deck (frontend/public/deck/, copied into the build).
+    WhiteNoise already serves its images and videos — with byte ranges, which
+    Safari needs for <video> — but it has no index-file handling, so /deck/
+    itself would otherwise fall through to the React app below."""
+    index_path = settings.BASE_DIR / "frontend_dist" / "deck" / "index.html"
+    if not index_path.exists():
+        return HttpResponse("Slide deck not built (frontend_dist/deck/index.html missing).", status=501)
+    return FileResponse(open(index_path, "rb"), content_type="text/html")
+
+
 urlpatterns += [
+    re_path(r"^deck/?$", deck_index),
     re_path(r"^(?!api/|django-admin/|media/|static/).*$", frontend_index),
 ]
