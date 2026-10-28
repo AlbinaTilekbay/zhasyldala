@@ -65,6 +65,10 @@ export default function DoseCalculator({ greenhouseId, sectorCount, suggested })
   const [unit, setUnit] = useState("г");
   const [water, setWater] = useState("");
   const [cover, setCover] = useState("");
+  // Only for "Басқа препарат": the farmer types the name off the package
+  // instead of picking from a list — we keep no database of other products
+  // because their label rates would need checking one by one.
+  const [customName, setCustomName] = useState("");
   const [sectors, setSectors] = useState(String(sectorCount || 1));
 
   // The suggestion arrives after the scan report loads; apply it unless the
@@ -113,6 +117,7 @@ export default function DoseCalculator({ greenhouseId, sectorCount, suggested })
   }
 
   const product = PRODUCTS.find((p) => p.key === productKey);
+  const productLabel = productKey === "custom" && customName.trim() ? customName.trim() : product.name;
   const totalArea = num(area) * num(sectors);
   const share = num(cover) > 0 ? totalArea / num(cover) : 0;
   const litres = share * num(water);
@@ -138,6 +143,12 @@ export default function DoseCalculator({ greenhouseId, sectorCount, suggested })
         {field("Сектор ауданы, м²", area, setArea, { onBlur: saveArea })}
         {field("Сектор саны", sectors, setSectors, { inputMode: "numeric" })}
       </div>
+      {productKey === "custom" && (
+        <label className="field" style={{ padding: "9px 12px 8px" }}>
+          <div className="field-label">Препарат атауы</div>
+          <input value={customName} onChange={(e) => setCustomName(e.target.value)} placeholder="қаптамадағы атауы" maxLength={60} />
+        </label>
+      )}
       <div className="eyebrow" style={{ marginBottom: -4 }}>Қаптамада жазылғандай</div>
       <div style={{ display: "flex", gap: 8 }}>
         <label className="field" style={{ flex: 1.15, minWidth: 0, padding: "9px 12px 8px" }}>
@@ -160,7 +171,7 @@ export default function DoseCalculator({ greenhouseId, sectorCount, suggested })
       </div>
       {areaNote && <div className="form-error">{areaNote}</div>}
       <div className="eyebrow" style={{ borderTop: "1px solid var(--ink-hairline)", paddingTop: 12 }}>
-        Ұсынылатын норма · {product.name}
+        Ұсынылатын норма · {productLabel}
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", marginTop: -6 }}>
         <div>
