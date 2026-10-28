@@ -154,6 +154,18 @@ _FRONTEND_DIST = BASE_DIR / "frontend_dist"
 if _FRONTEND_DIST.exists():
     WHITENOISE_ROOT = _FRONTEND_DIST
 
+
+def _deck_cache_headers(headers, path, url):
+    """WhiteNoise gives root files a 60-second cache, so the defence deck's
+    slides and clips (~12 MB) were downloaded again on every visit over a
+    slow Railway round trip. Let browsers keep them for a week; the deck page
+    adds ?v=N to every URL, so replacing a slide still reaches viewers."""
+    if url.startswith(("/deck/s/", "/deck/v/")):
+        headers["Cache-Control"] = "public, max-age=604800"
+
+
+WHITENOISE_ADD_HEADERS_FUNCTION = _deck_cache_headers
+
 MEDIA_URL = "/media/"
 # The leading slash above matters a lot more than it looks: DRF's
 # ImageField.to_representation() builds the URL the frontend receives as

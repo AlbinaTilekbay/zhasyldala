@@ -44,10 +44,18 @@
   .count { font: 600 13px/1 var(--mono); font-variant-numeric: tabular-nums; color: var(--ink-dim); padding: 0 8px; letter-spacing: .04em; }
   .count b { color: var(--ink); font-weight: 600; }
   .progress { position: fixed; left: 0; top: 0; height: 3px; background: var(--accent); transition: width .25s ease; }
-  @media (prefers-reduced-motion: reduce) { .slide, .vid, .bar, .progress { transition: none; } }
+  /* Shown while the current slide's image is still on its way — on a slow
+     connection the stage used to stay plain black, which looked broken. */
+  .loading { position: fixed; inset: 0; display: grid; place-items: center; pointer-events: none; transition: opacity .25s ease; }
+  .loading.off { opacity: 0; }
+  .loading div { display: flex; align-items: center; gap: 12px; font: 500 15px/1.3 var(--sans); color: var(--ink-dim); }
+  .spin { width: 18px; height: 18px; border-radius: 50%; border: 2px solid rgba(111, 224, 94, .25); border-top-color: var(--accent); animation: spin .8s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) { .slide, .vid, .bar, .progress, .loading { transition: none; } .spin { animation-duration: 2.4s; } }
 </style>
 
 <div class="progress" id="progress"></div>
+<div class="loading" id="loading" role="status"><div><span class="spin" aria-hidden="true"></span>Слайдтар жүктелуде…</div></div>
 <main class="deck" id="deck" aria-roledescription="presentation">
   <div class="frame" id="frame"></div>
 </main>
@@ -80,6 +88,10 @@ const SLIDES = [
 ];
 const N = SLIDES.length;
 const pad = (n) => String(n).padStart(2, "0");
+// The server lets browsers keep the slides and clips for a week (see
+// WHITENOISE_ADD_HEADERS_FUNCTION), so bump this whenever a file in s/ or v/
+// is replaced — otherwise returning viewers would keep the old picture.
+const V = "2";
 const frame = document.getElementById("frame");
 const els = SLIDES.map((s, i) => {
   const sec = document.createElement("section");
@@ -90,9 +102,10 @@ const els = SLIDES.map((s, i) => {
   img.decoding = "async";
   // Only the first slides load up front; the rest are fetched just before
   // they're shown (see warm()), so a weak connection still opens fast.
-  img.dataset.src = `s/s${pad(i + 1)}.webp`;
-  img.dataset.srcset = `s/s${pad(i + 1)}-1280.webp 1280w, s/s${pad(i + 1)}.webp 1920w`;
+  img.dataset.src = `s/s${pad(i + 1)}.webp?v=${V}`;
+  img.dataset.srcset = `s/s${pad(i + 1)}-1280.webp?v=${V} 1280w, s/s${pad(i + 1)}.webp?v=${V} 1920w`;
   img.sizes = "100vw";
+  img.addEventListener("load", () => { if (els[cur] === sec) showLoading(false); });
   sec.appendChild(img);
   if (s.v) {
     const box = document.createElement("div");
@@ -129,9 +142,33 @@ function attachVideo(v) {
   if (v.dataset.ready) return;
   for (const [ext, type] of ORDER) {
     const src = document.createElement("source");
-    src.src = `${v.dataset.base}.${ext}`; src.type = type; v.appendChild(src);
+    src.src = `${v.dataset.base}.${ext}?v=${V}`; src.type = type; v.appendChild(src);
   }
   v.dataset.ready = "1"; v.preload = "auto"; v.load();
+}
+
+const loading = document.getElementById("loading");
+function showLoading(on) { loading.classList.toggle("off", !on); }
+
+// Once the first slide is on screen, fetch everything else in the background
+// — images first (small), then the clips one at a time — so moving through
+// the deck never waits on the network. Each slide used to be fetched only a
+// step before it was shown, and Railway takes ~0.5–1.5 s per request, so a
+// presenter clicking ahead saw a blank stage.
+let preloading = false;
+function preloadAll() {
+  if (preloading) return; preloading = true;
+  els.forEach((_, i) => warm(i));
+  const vids = els.map((sec) => sec.querySelector("video")).filter(Boolean);
+  (function nextVid(k) {
+    const v = vids[k]; if (!v) return;
+    const done = () => { clearTimeout(t); nextVid(k + 1); };
+    const t = setTimeout(done, 20000); // don't stall the queue on a slow clip
+    if (v.dataset.ready && v.readyState >= 4) { done(); return; }
+    v.addEventListener("canplaythrough", done, { once: true });
+    v.addEventListener("error", done, { once: true });
+    attachVideo(v);
+  })(0);
 }
 
 let cur = -1;
@@ -146,6 +183,8 @@ function go(i) {
   cur = i;
   [i, i + 1, i + 2, i - 1].forEach(warm);
   els[i].classList.add("on");
+  const shown = els[i].querySelector("img");
+  showLoading(!(shown.complete && shown.naturalWidth));
   const v = els[i].querySelector("video");
   if (v) { attachVideo(v); const p = v.play(); if (p && p.catch) p.catch(() => {}); }
   // Fetch the next video slide's clip early so it starts without a wait.
@@ -197,6 +236,11 @@ addEventListener("mousemove", poke);
 const start = parseInt((location.hash || "").replace("#", ""), 10);
 go(Number.isFinite(start) ? start - 1 : 0);
 poke();
+// Start the background fetch after the opening slide has arrived, so it
+// doesn't compete with the one picture the viewer is waiting for.
+const first = els[cur].querySelector("img");
+if (first.complete && first.naturalWidth) preloadAll();
+else { first.addEventListener("load", preloadAll, { once: true }); first.addEventListener("error", preloadAll, { once: true }); }
 </script>
 
 </body>

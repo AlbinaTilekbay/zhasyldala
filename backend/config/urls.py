@@ -2,7 +2,7 @@ import re
 
 from django.conf import settings
 from django.contrib import admin
-from django.http import FileResponse, HttpResponse
+from django.http import FileResponse, HttpResponse, HttpResponseRedirect
 from django.urls import include, path, re_path
 from django.views.static import serve as serve_static
 from rest_framework_simplejwt.views import TokenRefreshView
@@ -81,7 +81,16 @@ def deck_index(request, *args, **kwargs):
     return FileResponse(open(index_path, "rb"), content_type="text/html")
 
 
+def deck_slash(request, *args, **kwargs):
+    """/deck without the trailing slash used to render the deck too, but the
+    page loads its slides by relative path (s/s01.webp), which then resolved
+    to /s/... instead of /deck/s/... — the deck opened with blank slides.
+    Send it to /deck/ so the relative paths land in the right folder."""
+    return HttpResponseRedirect("/deck/")
+
+
 urlpatterns += [
-    re_path(r"^deck/?$", deck_index),
+    re_path(r"^deck$", deck_slash),
+    re_path(r"^deck/$", deck_index),
     re_path(r"^(?!api/|django-admin/|media/|static/).*$", frontend_index),
 ]
