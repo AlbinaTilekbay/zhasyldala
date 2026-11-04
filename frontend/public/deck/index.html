@@ -91,7 +91,7 @@ const pad = (n) => String(n).padStart(2, "0");
 // The server lets browsers keep the slides and clips for a week (see
 // WHITENOISE_ADD_HEADERS_FUNCTION), so bump this whenever a file in s/ or v/
 // is replaced — otherwise returning viewers would keep the old picture.
-const V = "2";
+const V = "3";
 const frame = document.getElementById("frame");
 const els = SLIDES.map((s, i) => {
   const sec = document.createElement("section");
